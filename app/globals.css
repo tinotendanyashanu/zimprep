@@ -1,26 +1,131 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-dm-sans);
+  
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --radius-3xl: calc(var(--radius) + 12px);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+:root {
+  --radius: 0.75rem;
+  
+  /* Apple/Square-inspired Light Mode (Default) */
+  --background: #FFFFFF;
+  --foreground: #1D1D1F; /* Deep charcoal, not black */
+  
+  --card: #F5F5F7; /* Apple's light gray secondary background */
+  --card-foreground: #1D1D1F;
+  
+  --primary: #00875F; /* Refined ZimPrep Green - Deep & Corporate */
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #F5F5F7;
+  --secondary-foreground: #1D1D1F;
+  
+  --muted: #F5F5F7;
+  --muted-foreground: #86868B; /* Apple's body text gray */
+  
+  --accent: #00875F;
+  --accent-foreground: #FFFFFF;
+  
+  --border: #D2D2D7;
+  --input: #E5E5E5;
+  --ring: #00875F;
+}
+
+/* Optional Dark Mode - Radical Minimalism */
+.dark {
+  --background: #000000;
+  --foreground: #F5F5F7;
+  
+  --card: #1D1D1F;
+  --card-foreground: #F5F5F7;
+  
+  --primary: #00875F; /* Keep consistent brand color */
+  --primary-foreground: #FFFFFF;
+  
+  --secondary: #1D1D1F;
+  --secondary-foreground: #F5F5F7;
+  
+  --muted: #1D1D1F;
+  --muted-foreground: #86868B;
+  
+  --accent: #2C2C2E;
+  --accent-foreground: #FFFFFF;
+  
+  --border: #333336;
+  --input: #333336;
+  --ring: #00875F;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02";
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Apple-style Panel logic */
+  .panel {
+    @apply bg-card rounded-3xl p-8 md:p-12 overflow-hidden;
+  }
+
+  /* Typography utilities for "Calm" feel */
+  .text-calm-h1 {
+    @apply text-5xl md:text-7xl font-semibold tracking-tight leading-[1.05];
+  }
+  
+  .text-calm-h2 {
+    @apply text-4xl md:text-5xl font-semibold tracking-tight leading-[1.1];
+  }
+
+  .text-calm-h3 {
+    @apply text-2xl md:text-3xl font-medium tracking-tight;
+  }
+  
+  .text-calm-body {
+    @apply text-lg md:text-xl text-muted-foreground leading-relaxed font-normal;
+  }
+
+  .text-calm-slogan {
+    @apply text-xl md:text-2xl font-medium tracking-tight text-foreground;
+  }
+
+  /* Button Reset & Styles */
+  .btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-primary px-8 py-3 text-sm font-medium text-primary-foreground transition-all duration-200 hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center rounded-full bg-transparent px-8 py-3 text-sm font-medium text-primary transition-colors hover:bg-primary/5 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none;
+  }
+  
+  .btn-text {
+    @apply inline-flex items-center justify-center rounded-md px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus:outline-none disabled:opacity-50 disabled:pointer-events-none;
+  }
 }
