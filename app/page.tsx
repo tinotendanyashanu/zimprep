@@ -28,7 +28,7 @@ export default function Home() {
           </h1>
           {/* Clarification Line - Critical */}
           <p className="text-calm-body max-w-3xl mx-auto mb-10">
-             Practice real exam papers with examiner-style marking, built strictly to ZIMSEC standards.
+             Practice real exam papers for Grade 7, Form 4, and Form 6 with examiner-style marking.
           </p>
           <div className="flex items-center justify-center gap-4 mb-20">
             <Button size="lg" className="btn-primary h-14 px-10 text-lg rounded-full">
@@ -75,7 +75,7 @@ export default function Home() {
       */}
       <section className="border-y border-border/40 py-8 bg-zinc-50/50">
          <div className="max-w-7xl mx-auto px-6 flex flex-col md:flex-row justify-center items-center gap-4 md:gap-24 text-center">
-            <span className="text-sm md:text-base font-medium text-muted-foreground tracking-wide">Aligned with official ZIMSEC syllabus</span>
+            <span className="text-sm md:text-base font-medium text-muted-foreground tracking-wide">Grade 7, O-Level & A-Level</span>
             <span className="hidden md:block w-1.5 h-1.5 rounded-full bg-zinc-300" />
             <span className="text-sm md:text-base font-medium text-muted-foreground tracking-wide">Structured using real past exam formats</span>
             <span className="hidden md:block w-1.5 h-1.5 rounded-full bg-zinc-300" />
