@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+import logging
 
 from app.observability.logging import configure_logging
 from app.api.gateway import router as gateway_router
@@ -19,8 +20,17 @@ app.include_router(gateway_router)
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
-    # TODO: Register engines
-    pass
+    from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
+    from app.orchestrator.engine_registry import engine_registry
+    
+    # Register Identity & Subscription Engine
+    engine_registry.register(
+        "identity_subscription",
+        IdentitySubscriptionEngine()
+    )
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Registered identity_subscription engine")
 
 
 @app.on_event("shutdown")

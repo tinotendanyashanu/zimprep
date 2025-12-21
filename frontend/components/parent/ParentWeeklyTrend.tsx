@@ -4,16 +4,16 @@ import { TrendingUp, TrendingDown, Minus } from 'lucide-react';
 export function ParentWeeklyTrend() {
   // Mock data for last 7 days activity (1=active, 0=inactive)
   const activityData = [1, 1, 0, 1, 1, 1, 1]; 
-  const trend: "up" | "down" | "stable" = "up";
+    const trend: "up" | "down" | "stable" = "up";
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-[2rem] p-8 border border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow duration-300 flex flex-col justify-between h-full">
         <div>
             <div className="flex items-center justify-between mb-4">
                  <h3 className="text-sm font-bold uppercase tracking-widest text-zinc-500 dark:text-zinc-400">Weekly Momentum</h3>
-                 {trend === 'up' && <TrendingUp className="w-5 h-5 text-emerald-500" />}
-                 {trend === 'down' && <TrendingDown className="w-5 h-5 text-orange-500" />}
-                 {trend === 'stable' && <Minus className="w-5 h-5 text-zinc-400" />}
+                 {(trend as "up" | "down" | "stable") === 'up' && <TrendingUp className="w-5 h-5 text-emerald-500" />}
+                 {(trend as "up" | "down" | "stable") === 'down' && <TrendingDown className="w-5 h-5 text-orange-500" />}
+                 {(trend as "up" | "down" | "stable") === 'stable' && <Minus className="w-5 h-5 text-zinc-400" />}
             </div>
             
              <p className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">

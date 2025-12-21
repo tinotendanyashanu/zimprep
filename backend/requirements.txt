@@ -9,9 +9,17 @@ pydantic-settings==2.6.1
 # Database - PostgreSQL (using psycopg3 for better Windows compatibility)
 sqlalchemy==2.0.36
 psycopg[binary]==3.3.2
+asyncpg==0.30.0
 
 # Database - MongoDB
 pymongo==4.10.1
+
+# Redis for caching
+redis>=5.0.0
+hiredis>=3.0.0
+
+# Async SQLite (for testing)
+aiosqlite>=0.20.0
 
 # Environment and config
 python-dotenv==1.0.1

@@ -14,7 +14,7 @@
 // =============================================================================
 // Common Types (System-wide)
 // =============================================================================
-export {
+export type {
   EngineTrace,
   BaseEngineError,
   EngineResponse,
@@ -26,7 +26,7 @@ export {
 // =============================================================================
 
 // Identity & Subscription Engine
-export {
+export type {
   IdentityInput,
   IdentityOutput,
   IdentityError,
@@ -36,7 +36,7 @@ export {
 } from './identity';
 
 // Exam Structure Engine
-export {
+export type {
   ExamStructureInput,
   ExamStructureOutput,
   ExamStructureError,
@@ -47,7 +47,7 @@ export {
 } from './exam-structure';
 
 // Session & Timing Engine
-export {
+export type {
   SessionInput,
   SessionOutput,
   SessionError,
@@ -57,7 +57,7 @@ export {
 } from './session';
 
 // Submission Engine
-export {
+export type {
   SubmissionInput,
   SubmissionOutput,
   SubmissionError,
@@ -66,7 +66,7 @@ export {
 } from './submission';
 
 // Results Engine
-export {
+export type {
   ResultsInput,
   ResultsOutput,
   ResultsError,
@@ -79,7 +79,7 @@ export {
 // =============================================================================
 
 // Embedding Engine
-export {
+export type {
   EmbeddingInput,
   EmbeddingOutput,
   EmbeddingError,
@@ -88,7 +88,7 @@ export {
 } from './embedding';
 
 // Retrieval Engine
-export {
+export type {
   RetrievalInput,
   RetrievalOutput,
   RetrievalError,
@@ -100,7 +100,7 @@ export {
 } from './retrieval';
 
 // Reasoning & Marking Engine
-export {
+export type {
   MarkingInput,
   MarkingOutput,
   MarkingError,
@@ -110,7 +110,7 @@ export {
 } from './marking';
 
 // Validation & Consistency Engine
-export {
+export type {
   ValidationInput,
   ValidationOutput,
   ValidationError,
@@ -122,7 +122,7 @@ export {
 } from './validation';
 
 // Recommendation Engine
-export {
+export type {
   RecommendationInput,
   RecommendationOutput,
   RecommendationError,
