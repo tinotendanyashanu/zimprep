@@ -1,164 +1,103 @@
 "use client";
 
-import Link from "next/link";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { BookOpen, TrendingUp, Clock, Target, ArrowRight } from "lucide-react";
+import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { Button } from '@/components/ui/button';
+import { Settings } from 'lucide-react';
+import { DashboardHeader } from '@/components/dashboard/header';
+import { SubjectCard } from '@/components/dashboard/subject-card';
+import { LoadingState } from '@/components/system/LoadingState';
 
-export default function Dashboard() {
+interface UserProfile {
+  level: string;
+  subjects: string[];
+  goal: string;
+}
+
+export default function DashboardPage() {
+  const router = useRouter();
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // 1. Auth Guard
+    const isAuthenticated = localStorage.getItem("isAuthenticated");
+    if (!isAuthenticated) {
+      router.replace("/login");
+      return;
+    }
+
+    // 2. Onboarding Guard
+    const onboardingCompleted = localStorage.getItem("onboarding_completed");
+    if (!onboardingCompleted) {
+      router.replace("/onboarding");
+      return;
+    }
+
+    // 3. Load Profile
+    const storedProfile = localStorage.getItem("user_profile");
+    if (storedProfile) {
+      setProfile(JSON.parse(storedProfile));
+    }
+    setLoading(false);
+  }, [router]);
+
+  if (loading) return <div className="h-screen flex items-center justify-center"><LoadingState variant="spinner" text="Loading workspace..." /></div>;
+
   return (
-    <main className="min-h-screen bg-zinc-50">
-      {/* Header */}
-      <header className="border-b border-zinc-200 bg-white">
-        <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href="/" className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-[#065F46] rounded-lg flex items-center justify-center">
-              <span className="text-xs text-white font-bold">Z</span>
-            </div>
-            <span className="font-bold text-zinc-900">ZimPrep</span>
-          </Link>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-zinc-600">Tinashe M.</span>
-            <div className="w-8 h-8 rounded-full bg-[#065F46] flex items-center justify-center">
-              <span className="text-sm text-white font-medium">T</span>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-6 py-12">
-        {/* Welcome */}
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold text-zinc-900 mb-2">Welcome back, Tinashe</h1>
-          <p className="text-zinc-600">Continue your exam preparation journey</p>
+    <div className="min-h-screen bg-zinc-50/50">
+      <DashboardHeader />
+      
+      <main className="max-w-7xl mx-auto p-6 md:p-12 space-y-12 animate-in fade-in duration-500 delay-100">
+        
+        {/* Welcome Section */}
+        <div className="space-y-4">
+           <h1 className="text-calm-h2">Welcome back.</h1>
+           <p className="text-calm-body text-base max-w-2xl">
+              You are preparing for <span className="font-semibold text-foreground">{profile?.level === 'O_LEVEL' ? 'O-Levels' : 'A-Levels'}</span>. 
+              Focus on one subject at a time to build confidence.
+           </p>
         </div>
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          <Card className="border-zinc-200 bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <Clock className="w-5 h-5 text-[#065F46]" />
-                <span className="text-xs text-zinc-500 uppercase">Total Time</span>
-              </div>
-              <div className="text-3xl font-bold text-zinc-900">24h</div>
-              <div className="text-xs text-zinc-500 mt-1">Practice time</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-zinc-200 bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <Target className="w-5 h-5 text-[#065F46]" />
-                <span className="text-xs text-zinc-500 uppercase">Completed</span>
-              </div>
-              <div className="text-3xl font-bold text-zinc-900">12</div>
-              <div className="text-xs text-zinc-500 mt-1">Exam papers</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-zinc-200 bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <TrendingUp className="w-5 h-5 text-[#065F46]" />
-                <span className="text-xs text-zinc-500 uppercase">Average</span>
-              </div>
-              <div className="text-3xl font-bold text-zinc-900">78%</div>
-              <div className="text-xs text-emerald-600 mt-1">↑ 12% from last week</div>
-            </CardContent>
-          </Card>
-
-          <Card className="border-zinc-200 bg-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-2">
-                <BookOpen className="w-5 h-5 text-[#065F46]" />
-                <span className="text-xs text-zinc-500 uppercase">Subjects</span>
-              </div>
-              <div className="text-3xl font-bold text-zinc-900">5</div>
-              <div className="text-xs text-zinc-500 mt-1">Active subjects</div>
-            </CardContent>
-          </Card>
+        {/* Suggested Action */}
+        <div className="bg-emerald-50 border border-emerald-100 p-6 rounded-2xl flex items-center justify-between transition-colors hover:bg-emerald-100/50 cursor-pointer" onClick={() => router.push('/recommendations')}>
+            <div>
+                <div className="flex items-center gap-2 mb-1">
+                  <h4 className="font-bold text-emerald-900">AI Recommendations</h4>
+                  <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-bold uppercase tracking-wide">New</span>
+                </div>
+                <p className="text-emerald-700 text-sm">View evidence-based study suggestions personalized for you.</p>
+            </div>
+            <Button className="bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-200">
+                View Suggestions
+            </Button>
         </div>
 
         {/* Subjects Grid */}
-        <div className="mb-12">
-          <h2 className="text-2xl font-bold text-zinc-900 mb-6">Your Subjects</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {[
-              { name: "Mathematics", papers: 2, progress: 65, color: "blue" },
-              { name: "Physics", papers: 2, progress: 45, color: "emerald" },
-              { name: "Chemistry", papers: 2, progress: 80, color: "purple" },
-            ].map((subject) => (
-              <Card key={subject.name} className="border-zinc-200 bg-white hover-lift cursor-pointer">
-                <CardContent className="pt-6">
-                  <div className="flex items-start justify-between mb-4">
-                    <div>
-                      <h3 className="font-bold text-zinc-900 text-lg mb-1">{subject.name}</h3>
-                      <p className="text-sm text-zinc-500">{subject.papers} papers available</p>
-                    </div>
-                    <div className="w-12 h-12 rounded-lg bg-[#065F46]/10 flex items-center justify-center">
-                      <BookOpen className="w-6 h-6 text-[#065F46]" />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-zinc-600">Progress</span>
-                      <span className="font-medium text-zinc-900">{subject.progress}%</span>
-                    </div>
-                    <div className="h-2 bg-zinc-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[#065F46] rounded-full"
-                        style={{ width: `${subject.progress}%` }}
-                      />
-                    </div>
-                  </div>
-                  <Button asChild className="w-full mt-4 bg-[#065F46] hover:bg-[#055444]">
-                    <Link href={`/exam/${subject.name.toLowerCase()}`}>
-                      Start Practice
-                      <ArrowRight className="w-4 h-4 ml-2" />
-                    </Link>
-                  </Button>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
+        <div>
+            <div className="flex items-center justify-between mb-6">
+                <h3 className="text-calm-h3">Your Subjects</h3>
+                <Button variant="outline" size="sm" className="gap-2">
+                    <Settings className="w-4 h-4" /> Manage
+                </Button>
+            </div>
+            
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
+               {(profile?.subjects || []).map((subject) => (
+                   <SubjectCard key={subject} subject={subject} />
+               ))}
+
+               {/* Add Subject Card */}
+               <div className="p-6 rounded-3xl border-2 border-dashed border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all cursor-pointer flex flex-col items-center justify-center text-center gap-4 min-h-[200px] opacity-60 hover:opacity-100">
+                   <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
+                       <span className="text-2xl text-zinc-400">+</span>
+                   </div>
+                   <p className="font-medium text-zinc-500">Add Subject</p>
+               </div>
+            </div>
         </div>
 
-        {/* Recent Activity */}
-        <div>
-          <h2 className="text-2xl font-bold text-zinc-900 mb-6">Recent Activity</h2>
-          <Card className="border-zinc-200 bg-white">
-            <CardContent className="pt-6">
-              <div className="space-y-4">
-                {[
-                  { subject: "Mathematics P2", score: 82, date: "2 hours ago" },
-                  { subject: "Physics P1", score: 76, date: "Yesterday" },
-                  { subject: "Chemistry P2", score: 91, date: "2 days ago" },
-                ].map((activity, i) => (
-                  <div
-                    key={i}
-                    className="flex items-center justify-between py-3 border-b border-zinc-100 last:border-0"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-lg bg-[#065F46]/10 flex items-center justify-center">
-                        <BookOpen className="w-5 h-5 text-[#065F46]" />
-                      </div>
-                      <div>
-                        <div className="font-medium text-zinc-900">{activity.subject}</div>
-                        <div className="text-sm text-zinc-500">{activity.date}</div>
-                      </div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-xl font-bold text-[#065F46]">{activity.score}%</div>
-                      <div className="text-xs text-zinc-500">Score</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-    </main>
+      </main>
+    </div>
   );
 }

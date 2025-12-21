@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { DM_Sans } from "next/font/google";
 import "./globals.css";
-import NavBar from "./NavBar";
+import { SessionRecoveryNotice } from "@/components/system/SessionRecoveryNotice";
+import { IdentityProvider } from "@/lib/identity/useUserIdentity";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -23,10 +24,16 @@ export default function RootLayout({
     <html lang="en" className="light scroll-smooth" suppressHydrationWarning>
       <body
         className={`${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground`}
+        suppressHydrationWarning
       >
-        <NavBar />
-        <main className="relative">{children}</main>
+        <IdentityProvider>
+          <main className="relative">
+            {children}
+            <SessionRecoveryNotice />
+          </main>
+        </IdentityProvider>
       </body>
     </html>
   );
 }
+
