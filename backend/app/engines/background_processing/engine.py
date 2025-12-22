@@ -1,6 +1,7 @@
 """Background Processing Engine
 
 Main orchestrator-facing entry point for asynchronous job execution.
+Refactored to use queue, workers, policies, jobs, and observability architecture.
 """
 
 import logging
@@ -16,20 +17,28 @@ from app.orchestrator.execution_context import ExecutionContext
 from app.engines.background_processing.schemas.input import JobInput, TaskType
 from app.engines.background_processing.schemas.output import JobOutput, JobStatus
 
-from app.engines.background_processing.services import (
-    MarkingJobExecutor,
-    EmbeddingJobExecutor,
-    AnalyticsJobExecutor,
-    MaintenanceJobExecutor,
-    RetryManager,
-    ResourceMonitor,
-    ArtifactManager,
+# New architecture imports
+from app.engines.background_processing.jobs import (
+    MarkingJob,
+    EmbeddingJob,
+    AnalyticsJob,
+    MaintenanceJob,
 )
+
+from app.engines.background_processing.policies import (
+    RetryPolicy,
+    IdempotencyPolicy,
+)
+
+from app.engines.background_processing.observability import MetricsCollector
 
 from app.engines.background_processing.repositories import (
     JobRepository,
     ArtifactRepository,
 )
+
+# Artifact manager from services (still needed)
+from app.engines.background_processing.services import ArtifactManager
 
 from app.engines.background_processing.errors import (
     BackgroundProcessingError,
@@ -38,16 +47,23 @@ from app.engines.background_processing.errors import (
     ErrorCode,
 )
 
+
 logger = logging.getLogger(__name__)
 
 ENGINE_NAME = "background_processing"
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "2.0.0"  # Updated to reflect new architecture
 
 
 class BackgroundProcessingEngine:
     """Production-grade asynchronous job execution engine for ZimPrep.
     
     Executes long-running, heavy, or non-interactive workloads asynchronously.
+    
+    Architecture:
+    - Queue-based job distribution
+    - Worker pool for concurrency
+    - Retry and idempotency policies
+    - Comprehensive observability
     
     Strict Rules:
     - Only executes work authorized by orchestrator
@@ -59,23 +75,36 @@ class BackgroundProcessingEngine:
     """
     
     def __init__(self):
-        """Initialize engine with all services and repositories."""
-        # Task executors
-        self.marking_executor = MarkingJobExecutor()
-        self.embedding_executor = EmbeddingJobExecutor()
-        self.analytics_executor = AnalyticsJobExecutor()
-        self.maintenance_executor = MaintenanceJobExecutor()
+        """Initialize engine with new architecture components."""
+        # Job executors (migrated from services)
+        self.marking_job = MarkingJob()
+        self.embedding_job = EmbeddingJob()
+        self.analytics_job = AnalyticsJob()
+        self.maintenance_job = MaintenanceJob()
         
-        # Infrastructure services
-        self.retry_manager = RetryManager()
-        self.resource_monitor = ResourceMonitor()
+        # Map task types to job executors
+        self.job_executors = {
+            TaskType.MARKING_JOB: self.marking_job.execute,
+            TaskType.EMBEDDING_GENERATION: self.embedding_job.execute,
+            TaskType.ANALYTICS_AGGREGATION: self.analytics_job.execute,
+            TaskType.INFRASTRUCTURE_MAINTENANCE: self.maintenance_job.execute,
+        }
+        
+        # Policies
+        self.retry_policy = RetryPolicy()
+        self.idempotency_policy = IdempotencyPolicy()
+        
+        # Observability
+        self.metrics_collector = MetricsCollector()
+        
+        # Infrastructure services (kept from original)
         self.artifact_manager = ArtifactManager()
         
         # Repositories
         self.job_repo = JobRepository()
         self.artifact_repo = ArtifactRepository()
         
-        logger.info(f"Engine initialized: {ENGINE_NAME} v{ENGINE_VERSION}")
+        logger.info(f"Engine initialized: {ENGINE_NAME} v{ENGINE_VERSION} (New Architecture)")
     
     async def run(
         self,
@@ -86,10 +115,10 @@ class BackgroundProcessingEngine:
         
         Execution Flow:
         1. Parse and validate JobInput
-        2. Verify orchestrator authorization
-        3. Route to task-specific executor
-        4. Monitor resource metrics
-        5. Apply retry logic on failures
+        2. Check idempotency (duplicate job detection)
+        3. Verify orchestrator authorization
+        4. Route to task-specific executor via retry policy
+        5. Monitor resource metrics
         6. Persist job artifacts
         7. Emit audit trail
         8. Return JobOutput
@@ -120,7 +149,20 @@ class BackgroundProcessingEngine:
                 }
             )
             
-            # Step 2: Create job record (idempotency check)
+            # Step 2: Check idempotency (new)
+            cached_result = await self.idempotency_policy.check_duplicate(
+                job_id=input_data.job_id,
+                trace_id=trace_id
+            )
+            
+            if cached_result:
+                logger.info(
+                    f"Returning cached result for duplicate job: {input_data.job_id}",
+                    extra={"trace_id": trace_id, "job_id": input_data.job_id}
+                )
+                return self._build_response(cached_result, trace_id, start_time)
+            
+            # Step 3: Create job record
             await self.job_repo.create_job_record(
                 job_id=input_data.job_id,
                 trace_id=trace_id,
@@ -131,9 +173,9 @@ class BackgroundProcessingEngine:
                 requested_at=input_data.requested_at
             )
             
-            # Step 3-5: Execute job with retry and monitoring
-            async with self.resource_monitor.track_job(trace_id, input_data.job_id):
-                result_artifacts, retry_count = await self.retry_manager.execute_with_retry(
+            # Step 4-5: Execute job with retry and monitoring (updated)
+            async with self.metrics_collector.track_job(trace_id, input_data.job_id):
+                result_artifacts, retry_count = await self.retry_policy.execute_with_retry(
                     operation=lambda: self._execute_task(input_data, trace_id),
                     retry_policy=input_data.retry_policy,
                     trace_id=trace_id,
@@ -141,8 +183,8 @@ class BackgroundProcessingEngine:
                     operation_name=f"{input_data.task_type.value}_execution"
                 )
             
-            # Get resource metrics
-            resource_metrics = self.resource_monitor.get_metrics()
+            # Get resource metrics (updated)
+            resource_metrics = self.metrics_collector.get_metrics()
             
             # Step 6: Persist artifacts
             persisted_artifacts = await self.artifact_manager.persist_artifacts(
@@ -160,6 +202,15 @@ class BackgroundProcessingEngine:
                 retry_count=retry_count
             )
             
+            # Record metrics (new)
+            self.metrics_collector.record_job_completion(
+                task_type=input_data.task_type.value,
+                success=True
+            )
+            
+            if retry_count > 0:
+                self.metrics_collector.record_retry(input_data.task_type.value)
+            
             # Step 8: Build success response
             output = JobOutput(
                 trace_id=trace_id,
@@ -172,13 +223,28 @@ class BackgroundProcessingEngine:
                 completed_at=datetime.utcnow().isoformat()
             )
             
-            return self._build_response(output, trace_id, start_time)
+            # Cache result for idempotency (new)
+            await self.idempotency_policy.cache_result(
+                job_id=input_data.job_id,
+                job_output=output,
+                trace_id=trace_id
+            )
             
+            return self._build_response(output, trace_id, start_time)
+        
         except ValidationError as e:
             logger.error(
                 "Input validation failed",
                 extra={"trace_id": trace_id, "error": str(e)}
             )
+            
+            # Record failure metrics (new)
+            self.metrics_collector.record_job_completion(
+                task_type="unknown",
+                success=False,
+                error_code=ErrorCode.INVALID_JOB_CONFIG.value
+            )
+            
             return self._build_error_response(
                 error_message=f"Invalid input: {str(e)}",
                 error_code=ErrorCode.INVALID_JOB_CONFIG,
@@ -192,6 +258,15 @@ class BackgroundProcessingEngine:
                 f"Job execution failed: {e.error_code.value}",
                 extra={"trace_id": trace_id, "error": str(e)}
             )
+            
+            # Record failure metrics (new)
+            if "job_id" in payload:
+                task_type = payload.get("task_type", "unknown")
+                self.metrics_collector.record_job_completion(
+                    task_type=task_type,
+                    success=False,
+                    error_code=e.error_code.value
+                )
             
             # Update job status to failed
             if "job_id" in payload:
@@ -247,24 +322,16 @@ class BackgroundProcessingEngine:
         payload = input_data.validated_payload
         job_id = input_data.job_id
         
-        # Route based on task type
-        if task_type == TaskType.MARKING_JOB:
-            return await self.marking_executor.execute(payload, trace_id, job_id)
+        # Route using job_executors mapping (updated for new architecture)
+        executor = self.job_executors.get(task_type)
         
-        elif task_type == TaskType.EMBEDDING_GENERATION:
-            return await self.embedding_executor.execute(payload, trace_id, job_id)
-        
-        elif task_type == TaskType.ANALYTICS_AGGREGATION:
-            return await self.analytics_executor.execute(payload, trace_id, job_id)
-        
-        elif task_type == TaskType.INFRASTRUCTURE_MAINTENANCE:
-            return await self.maintenance_executor.execute(payload, trace_id, job_id)
-        
-        else:
+        if not executor:
             raise TaskTypeNotSupportedError(
                 task_type=task_type.value,
                 trace_id=trace_id
             )
+        
+        return await executor(payload, trace_id, job_id)
     
     def _build_response(
         self,
