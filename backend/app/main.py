@@ -4,6 +4,7 @@ import logging
 from app.observability.logging import configure_logging
 from app.api.gateway import router as gateway_router
 from app.api.routes.health import router as health_router
+from app.engines.ai.recommendation.routes import router as recommendation_router
 
 
 # Configure logging
@@ -15,12 +16,14 @@ app = FastAPI(title="ZimPrep API")
 # Include routers
 app.include_router(health_router)
 app.include_router(gateway_router)
+app.include_router(recommendation_router)
 
 
 @app.on_event("startup")
 async def startup_event():
     """Initialize services on startup."""
     from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
+    from app.engines.ai.recommendation import get_recommendation_engine
     from app.orchestrator.engine_registry import engine_registry
     
     # Register Identity & Subscription Engine
@@ -29,8 +32,15 @@ async def startup_event():
         IdentitySubscriptionEngine()
     )
     
+    # Register Recommendation Engine
+    engine_registry.register(
+        "recommendation",
+        get_recommendation_engine()
+    )
+    
     logger = logging.getLogger(__name__)
     logger.info("Registered identity_subscription engine")
+    logger.info("Registered recommendation engine")
 
 
 @app.on_event("shutdown")
