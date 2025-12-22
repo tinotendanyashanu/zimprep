@@ -1,0 +1,481 @@
+"""
+Reporting & Analytics Engine - Core Engine
+
+Version: 1.0.0
+Type: Core Engine (NON-AI)
+Confidence: Always 1.0 (deterministic)
+
+This engine transforms immutable exam results into human-readable,
+role-appropriate insights. It NEVER calculates marks, infers performance,
+or performs AI reasoning. It ONLY formats, aggregates, visualizes, and
+exports already-finalized data.
+"""
+
+from typing import Dict, Any, List
+from uuid import UUID, uuid4
+from datetime import datetime
+import logging
+
+from app.engines.reporting_analytics.schemas.input import ReportingInput, UserRole
+from app.engines.reporting_analytics.schemas.output import (
+    ReportingOutput,
+    ReportType,
+    VisualSection,
+)
+from app.engines.reporting_analytics.rules.visibility_rules import VisibilityEnforcer
+from app.engines.reporting_analytics.rules.aggregation_rules import AggregationRules
+from app.engines.reporting_analytics.services.report_builder import ReportBuilderService
+from app.engines.reporting_analytics.services.trend_analyzer import TrendAnalyzerService
+from app.engines.reporting_analytics.services.visualization_mapper import VisualizationMapperService
+from app.engines.reporting_analytics.services.pdf_renderer import PDFRendererService
+from app.engines.reporting_analytics.services.export_service import ExportService
+from app.engines.reporting_analytics.schemas.input import ReportingScope, ExportFormat
+from app.engines.reporting_analytics.errors.exceptions import (
+    ReportingEngineError,
+    InvalidRoleError,
+    ResultsNotFoundError,
+    ReportGenerationError,
+    ExportFailureError,
+    VisibilityViolationError,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class ReportingAnalyticsEngine:
+    """
+    Reporting & Analytics Engine (v1.0.0)
+    
+    Position in Pipeline:
+    - Runs AFTER: Results Engine, Recommendation Engine
+    - Runs BEFORE: Audit & Compliance Engine
+    
+    Execution Flow (9 steps):
+    1. Validate input schema
+    2. Verify role-based visibility rules
+    3. Load immutable Results Engine output
+    4. Assemble report sections
+    5. Aggregate historical trends (if requested)
+    6. Render exports (PDF / CSV)
+    7. Produce deterministic output
+    8. Return ReportingOutput
+    9. Pass full trace to Audit Engine (via orchestrator)
+    
+    CRITICAL CONSTRAINTS:
+    - NEVER modify marks or grades
+    - NEVER recalculate results
+    - NEVER perform predictions or AI reasoning
+    - NEVER call other engines directly
+    - NEVER write to Results storage
+    - ALWAYS produce confidence = 1.0
+    """
+    
+    ENGINE_NAME = "reporting_analytics"
+    ENGINE_VERSION = "1.0.0"
+    ENGINE_TYPE = "core"  # Non-AI
+    
+    def __init__(self):
+        """Initialize the Reporting & Analytics Engine."""
+        self.logger = logger
+    
+    async def execute(
+        self,
+        input_data: ReportingInput,
+        results_data: Dict[str, Any] | None = None,
+        historical_data: List[Dict[str, Any]] | None = None,
+    ) -> ReportingOutput:
+        """
+        Execute the 9-step reporting flow.
+        
+        Args:
+            input_data: Validated ReportingInput
+            results_data: Immutable results from Results Engine
+            historical_data: Optional historical performance data
+            
+        Returns:
+            ReportingOutput with deterministic confidence = 1.0
+            
+        Raises:
+            ReportingEngineError: If any step fails
+        """
+        trace_id = input_data.trace_id
+        
+        self.logger.info(
+            f"[{trace_id}] Starting Reporting & Analytics Engine execution",
+            extra={
+                "trace_id": str(trace_id),
+                "user_id": str(input_data.user_id),
+                "role": input_data.role.value,
+                "scope": input_data.reporting_scope.value,
+            }
+        )
+        
+        try:
+            # Step 1: Validate input schema (already done by Pydantic)
+            self._log_step(trace_id, 1, "Input schema validated")
+            
+            # Step 2: Verify role-based visibility rules
+            self._verify_visibility(input_data)
+            self._log_step(trace_id, 2, "Visibility rules verified")
+            
+            # Step 3: Load immutable Results Engine output
+            results = self._load_results_data(input_data, results_data)
+            self._log_step(trace_id, 3, "Results data loaded")
+            
+            # Step 4: Assemble report sections
+            report_data = self._assemble_report(
+                input_data, results, historical_data
+            )
+            self._log_step(trace_id, 4, "Report sections assembled")
+            
+            # Step 5: Aggregate historical trends (if requested)
+            if input_data.reporting_scope == ReportingScope.LONGITUDINAL:
+                report_data = self._aggregate_trends(
+                    input_data, report_data, historical_data
+                )
+                self._log_step(trace_id, 5, "Historical trends aggregated")
+            else:
+                self._log_step(trace_id, 5, "Historical trends skipped (scope: {})".format(
+                    input_data.reporting_scope.value
+                ))
+            
+            # Step 6: Render exports (PDF / CSV)
+            export_links = self._render_exports(
+                input_data, report_data
+            )
+            self._log_step(trace_id, 6, "Exports rendered")
+            
+            # Step 7: Produce deterministic output
+            visual_sections = self._generate_visualizations(
+                input_data, report_data
+            )
+            self._log_step(trace_id, 7, "Visualizations generated")
+            
+            # Step 8: Return ReportingOutput
+            output = self._build_output(
+                input_data,
+                report_data,
+                visual_sections,
+                export_links,
+            )
+            self._log_step(trace_id, 8, "Output assembled")
+            
+            # Step 9: Pass full trace to Audit Engine (handled by orchestrator)
+            self._log_step(
+                trace_id,
+                9,
+                "Trace prepared for Audit Engine (orchestrator will handle)"
+            )
+            
+            self.logger.info(
+                f"[{trace_id}] Reporting & Analytics Engine execution completed",
+                extra={
+                    "trace_id": str(trace_id),
+                    "report_id": str(output.report_id),
+                    "confidence": output.confidence,
+                }
+            )
+            
+            return output
+        
+        except ReportingEngineError:
+            # Re-raise our custom errors
+            raise
+        
+        except Exception as e:
+            # Wrap unexpected errors
+            self.logger.error(
+                f"[{trace_id}] Unexpected error in Reporting & Analytics Engine",
+                extra={
+                    "trace_id": str(trace_id),
+                    "error": str(e),
+                },
+                exc_info=True,
+            )
+            raise ReportGenerationError(
+                message=f"Unexpected error in reporting engine: {str(e)}",
+                trace_id=trace_id,
+                context={"error": str(e)},
+            )
+    
+    def _verify_visibility(self, input_data: ReportingInput) -> None:
+        """
+        Step 2: Verify role-based visibility rules.
+        
+        Args:
+            input_data: Validated input
+            
+        Raises:
+            VisibilityViolationError: If access is not permitted
+            InvalidRoleError: If role is invalid
+        """
+        enforcer = VisibilityEnforcer(trace_id=input_data.trace_id)
+        
+        # Verify access (simplified - in production, check against DB)
+        enforcer.verify_access(
+            user_id=input_data.user_id,
+            role=input_data.role,
+            target_student_id=None,  # Would be determined from exam_session_id
+            target_school_id=None,  # Would be determined from exam_session_id
+        )
+    
+    def _load_results_data(
+        self,
+        input_data: ReportingInput,
+        results_data: Dict[str, Any] | None,
+    ) -> Dict[str, Any]:
+        """
+        Step 3: Load immutable Results Engine output.
+        
+        Args:
+            input_data: Validated input
+            results_data: Pre-loaded results data (from orchestrator)
+            
+        Returns:
+            Results data
+            
+        Raises:
+            ResultsNotFoundError: If results cannot be found
+        """
+        if results_data is None:
+            # In production, load from Results repository
+            # For now, raise error
+            raise ResultsNotFoundError(
+                message=f"Results not found for exam session {input_data.exam_session_id}",
+                trace_id=input_data.trace_id,
+                context={
+                    "exam_session_id": str(input_data.exam_session_id),
+                    "subject_code": input_data.subject_code,
+                },
+            )
+        
+        # Validate that we have the minimum required data
+        required_fields = ["exam_title", "subject_name", "percentage", "grade"]
+        missing_fields = [f for f in required_fields if f not in results_data]
+        
+        if missing_fields:
+            raise ReportGenerationError(
+                message=f"Results data missing required fields: {missing_fields}",
+                trace_id=input_data.trace_id,
+                context={
+                    "missing_fields": missing_fields,
+                },
+            )
+        
+        return results_data
+    
+    def _assemble_report(
+        self,
+        input_data: ReportingInput,
+        results: Dict[str, Any],
+        historical_data: List[Dict[str, Any]] | None,
+    ) -> Dict[str, Any]:
+        """
+        Step 4: Assemble report sections based on role.
+        
+        Args:
+            input_data: Validated input
+            results: Results data
+            historical_data: Optional historical data
+            
+        Returns:
+            Assembled report data (role-specific)
+            
+        Raises:
+            ReportGenerationError: If assembly fails
+        """
+        builder = ReportBuilderService(trace_id=input_data.trace_id)
+        
+        if input_data.role == UserRole.STUDENT:
+            report = builder.build_student_report(results, historical_data)
+            return report.model_dump()
+        
+        elif input_data.role == UserRole.PARENT:
+            report = builder.build_parent_report(results, historical_data)
+            return report.model_dump()
+        
+        elif input_data.role == UserRole.SCHOOL_ADMIN:
+            # For school reports, results should contain cohort data
+            cohort_results = results.get("cohort_results", [])
+            historical_trends = results.get("historical_trends", [])
+            report = builder.build_school_report(cohort_results, historical_trends)
+            return report.model_dump()
+        
+        else:
+            raise InvalidRoleError(
+                message=f"Unsupported role: {input_data.role}",
+                trace_id=input_data.trace_id,
+                context={"role": str(input_data.role)},
+            )
+    
+    def _aggregate_trends(
+        self,
+        input_data: ReportingInput,
+        report_data: Dict[str, Any],
+        historical_data: List[Dict[str, Any]] | None,
+    ) -> Dict[str, Any]:
+        """
+        Step 5: Aggregate historical trends (if requested).
+        
+        Args:
+            input_data: Validated input
+            report_data: Current report data
+            historical_data: Historical performance data
+            
+        Returns:
+            Report data with trends added
+        """
+        if not historical_data:
+            return report_data
+        
+        analyzer = TrendAnalyzerService(trace_id=input_data.trace_id)
+        
+        # Calculate overall trends
+        trend_analysis = analyzer.analyze_longitudinal_performance(
+            historical_data
+        )
+        
+        # Add trend data to report
+        report_data["trend_analysis"] = trend_analysis
+        
+        # Calculate metrics
+        metrics = analyzer.calculate_trend_metrics(historical_data)
+        report_data["trend_metrics"] = metrics
+        
+        return report_data
+    
+    def _render_exports(
+        self,
+        input_data: ReportingInput,
+        report_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """
+        Step 6: Render exports (PDF / CSV / JSON).
+        
+        Args:
+            input_data: Validated input
+            report_data: Complete report data
+            
+        Returns:
+            Dictionary of export links
+            
+        Raises:
+            ExportFailureError: If export fails
+        """
+        export_service = ExportService(trace_id=input_data.trace_id)
+        pdf_service = PDFRendererService(trace_id=input_data.trace_id)
+        
+        file_sizes = {}
+        
+        # Generate exports based on requested format
+        if input_data.export_format == ExportFormat.PDF:
+            pdf_bytes = pdf_service.render_report_to_pdf(
+                report_data=report_data,
+                report_type=input_data.role.value,
+                watermark_text=f"Generated: {datetime.now().isoformat()}",
+            )
+            file_sizes["pdf"] = len(pdf_bytes)
+            # TODO: Save PDF to storage
+        
+        if input_data.export_format == ExportFormat.CSV:
+            csv_string = export_service.export_to_csv(
+                report_data=report_data,
+                report_type=input_data.role.value,
+            )
+            file_sizes["csv"] = len(csv_string.encode('utf-8'))
+            # TODO: Save CSV to storage
+        
+        if input_data.export_format == ExportFormat.JSON:
+            json_string = export_service.export_to_json(report_data)
+            file_sizes["json"] = len(json_string.encode('utf-8'))
+            # TODO: Save JSON to storage
+        
+        # Generate download links
+        report_id = uuid4()
+        export_links = export_service.generate_export_links(
+            report_id=report_id,
+            formats=[input_data.export_format.value],
+            file_sizes=file_sizes,
+        )
+        
+        return export_links
+    
+    def _generate_visualizations(
+        self,
+        input_data: ReportingInput,
+        report_data: Dict[str, Any],
+    ) -> List[VisualSection]:
+        """
+        Step 7: Generate visualization sections.
+        
+        Args:
+            input_data: Validated input
+            report_data: Complete report data
+            
+        Returns:
+            List of VisualSection objects
+        """
+        mapper = VisualizationMapperService(trace_id=input_data.trace_id)
+        
+        visual_sections = mapper.generate_visual_sections(
+            report_data=report_data,
+            role=input_data.role.value,
+        )
+        
+        return visual_sections
+    
+    def _build_output(
+        self,
+        input_data: ReportingInput,
+        report_data: Dict[str, Any],
+        visual_sections: List[VisualSection],
+        export_links: Dict[str, Any],
+    ) -> ReportingOutput:
+        """
+        Step 8: Build the final output.
+        
+        Args:
+            input_data: Validated input
+            report_data: Complete report data
+            visual_sections: Visualization sections
+            export_links: Export download links
+            
+        Returns:
+            ReportingOutput with confidence = 1.0
+        """
+        # Map role to report type
+        role_to_type = {
+            UserRole.STUDENT: ReportType.STUDENT,
+            UserRole.PARENT: ReportType.PARENT,
+            UserRole.SCHOOL_ADMIN: ReportType.SCHOOL,
+        }
+        
+        return ReportingOutput(
+            report_id=uuid4(),
+            report_type=role_to_type[input_data.role],
+            generated_at=datetime.now(),
+            data_payload=report_data,
+            visual_sections=visual_sections,
+            export_links=export_links,
+            confidence=1.0,  # Always deterministic
+            trace_id=input_data.trace_id,
+            metadata={
+                "engine_name": self.ENGINE_NAME,
+                "engine_version": self.ENGINE_VERSION,
+                "engine_type": self.ENGINE_TYPE,
+                "reporting_scope": input_data.reporting_scope.value,
+                "export_format": input_data.export_format.value,
+                "feature_flags": input_data.feature_flags_snapshot,
+            },
+        )
+    
+    def _log_step(self, trace_id: UUID, step: int, message: str) -> None:
+        """Log a step in the execution flow."""
+        self.logger.info(
+            f"[{trace_id}] Step {step}/9: {message}",
+            extra={
+                "trace_id": str(trace_id),
+                "step": step,
+                "engine": self.ENGINE_NAME,
+            }
+        )
