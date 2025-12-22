@@ -15,3 +15,17 @@ class EngineRegistry:
 
 # Global registry instance
 engine_registry = EngineRegistry()
+
+
+# Register all engines
+# NOTE: Engines are registered here to avoid circular imports
+def _register_engines():
+    """Register all engines in the system."""
+    # Import and register appeal reconstruction engine
+    from app.engines.appeal_reconstruction.engine import AppealReconstructionEngine
+    engine_registry.register("appeal_reconstruction", AppealReconstructionEngine())
+
+
+# Call registration on import
+_register_engines()
+

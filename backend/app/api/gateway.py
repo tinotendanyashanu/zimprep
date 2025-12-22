@@ -20,9 +20,15 @@ from app.api.schemas import (
     PipelineExecutionRequest,
     PipelineExecutionResponse,
     EngineExecutionResult,
+    AppealReconstructRequest,
 )
-from app.orchestrator.orchestrator import orchestrator, PipelineExecutionError
+from app.orchestrator.orchestrator import (
+    orchestrator,
+    PipelineExecutionError,
+    AppealIntegrityError,
+)
 from app.orchestrator.execution_context import ExecutionContext
+from app.engines.appeal_reconstruction.schemas.output import AppealReconstructionOutput
 
 
 logger = logging.getLogger(__name__)
@@ -191,3 +197,156 @@ async def list_engines(
     return {
         "engines": list(orchestrator.registry._engines.keys())
     }
+
+
+@router.post(
+    "/appeals/reconstruct",
+    response_model=AppealReconstructionOutput,
+    status_code=status.HTTP_200_OK,
+    summary="Reconstruct exam decision for appeal",
+    description=(
+        "FORENSIC endpoint: Reconstructs an exam decision using stored audit data ONLY. "
+        "This endpoint NEVER re-executes AI engines. It rehydrates persisted evidence "
+        "and produces a human-readable, legally defensible explanation."
+    ),
+    tags=["appeals"]
+)
+async def reconstruct_appeal(
+    request: AppealReconstructRequest,
+    current_user: Annotated[User, Depends(get_current_user)]
+) -> AppealReconstructionOutput:
+    """Reconstruct an exam decision for appeal review.
+    
+    This endpoint is FORENSIC - it does NOT re-execute AI engines.
+    It only rehydrates stored evidence and explains the original decision.
+    
+    LEGAL GUARANTEES:
+    - re_executed will ALWAYS be False in the response
+    - No AI engines (embedding, retrieval, reasoning, recommendation) will execute
+    - All data comes from immutable audit records
+    - Output is legally defensible
+    
+    Args:
+        request: Appeal reconstruction request with trace_id and scope
+        current_user: Authenticated user from JWT token
+        
+    Returns:
+        AppealReconstructionOutput with human-readable explanation
+        
+    Raises:
+        HTTPException: If reconstruction fails or integrity is violated
+    """
+    # Create execution context (GATEWAY CREATES TRACE)
+    context = ExecutionContext.create(
+        user_id=current_user.id,
+        request_source="appeal",
+        feature_flags={}
+    )
+    
+    logger.info(
+        "Appeal reconstruction request received",
+        extra={
+            "original_trace_id": request.trace_id,
+            "scope": request.scope,
+            "trace_id": context.trace_id,
+            "request_id": context.request_id,
+            "user_id": current_user.id
+        }
+    )
+    
+    try:
+        # Execute appeal reconstruction pipeline
+        result = await orchestrator.execute_pipeline(
+            pipeline_name="appeal_reconstruction_v1",
+            payload=request.model_dump(),
+            context=context
+        )
+        
+        # Extract the appeal reconstruction output from engine outputs
+        appeal_output = result["engine_outputs"].get("appeal_reconstruction", {})
+        output_data = appeal_output.get("data")
+        
+        if not output_data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "trace_id": context.trace_id,
+                    "error": "Appeal reconstruction did not produce output",
+                    "original_trace_id": request.trace_id
+                }
+            )
+        
+        logger.info(
+            "Appeal reconstruction completed successfully",
+            extra={
+                "trace_id": context.trace_id,
+                "original_trace_id": request.trace_id,
+                "re_executed": False,
+                "duration_ms": result["total_duration_ms"]
+            }
+        )
+        
+        # Return the reconstruction output
+        if isinstance(output_data, AppealReconstructionOutput):
+            return output_data
+        else:
+            return AppealReconstructionOutput(**output_data.model_dump())
+    
+    except AppealIntegrityError as e:
+        # CRITICAL: AI engine tried to execute during appeal
+        logger.error(
+            "APPEAL INTEGRITY VIOLATION",
+            extra={
+                "trace_id": context.trace_id,
+                "original_trace_id": request.trace_id,
+                "blocked_engine": e.blocked_engine,
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "trace_id": context.trace_id,
+                "error": "Appeal integrity violation - AI engine attempted execution",
+                "blocked_engine": e.blocked_engine,
+                "original_trace_id": request.trace_id
+            }
+        )
+    
+    except PipelineExecutionError as e:
+        logger.error(
+            "Appeal reconstruction pipeline failed",
+            extra={
+                "trace_id": context.trace_id,
+                "original_trace_id": request.trace_id,
+                "failed_engine": e.failed_engine,
+                "error": str(e)
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "trace_id": context.trace_id,
+                "error": str(e),
+                "failed_engine": e.failed_engine,
+                "original_trace_id": request.trace_id
+            }
+        )
+    
+    except Exception as e:
+        logger.exception(
+            "Unexpected error during appeal reconstruction",
+            extra={
+                "trace_id": context.trace_id,
+                "original_trace_id": request.trace_id
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "trace_id": context.trace_id,
+                "error": "Internal server error during appeal reconstruction",
+                "original_trace_id": request.trace_id
+            }
+        )
+

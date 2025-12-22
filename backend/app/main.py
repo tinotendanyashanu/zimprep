@@ -24,6 +24,9 @@ async def startup_event():
     """Initialize services on startup."""
     from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
     from app.engines.ai.recommendation import get_recommendation_engine
+    from app.engines.reporting_analytics.reporting_adapter import ReportingEngineAdapter
+    from app.engines.results.engine import ResultsEngine
+    from app.engines.audit_compliance.engine import AuditComplianceEngine
     from app.orchestrator.engine_registry import engine_registry
     
     # Register Identity & Subscription Engine
@@ -38,9 +41,30 @@ async def startup_event():
         get_recommendation_engine()
     )
     
+    # Register Reporting Engine
+    engine_registry.register(
+        "reporting",
+        ReportingEngineAdapter()
+    )
+    
+    # Register Results Engine
+    engine_registry.register(
+        "results",
+        ResultsEngine()
+    )
+    
+    # Register Audit & Compliance Engine
+    engine_registry.register(
+        "audit_compliance",
+        AuditComplianceEngine()
+    )
+    
     logger = logging.getLogger(__name__)
     logger.info("Registered identity_subscription engine")
     logger.info("Registered recommendation engine")
+    logger.info("Registered reporting engine")
+    logger.info("Registered results engine")
+    logger.info("Registered audit_compliance engine")
 
 
 @app.on_event("shutdown")

@@ -5,9 +5,12 @@ from app.api.schemas.responses import (
     EngineExecutionResult,
     PipelineExecutionResponse,
 )
+from app.api.schemas.appeal import AppealReconstructRequest
 
 __all__ = [
     "PipelineExecutionRequest",
     "EngineExecutionResult",
     "PipelineExecutionResponse",
+    "AppealReconstructRequest",
 ]
+

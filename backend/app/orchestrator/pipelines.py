@@ -14,7 +14,29 @@ from typing import Literal
 
 
 # Type-safe pipeline names
-PipelineName = Literal["exam_attempt_v1"]
+PipelineName = Literal["exam_attempt_v1", "appeal_reconstruction_v1", "reporting_v1"]
+
+
+# AI engines that MUST NOT execute during appeal reconstruction
+# This is enforced centrally by the orchestrator
+BLOCKED_ENGINES_DURING_APPEAL = frozenset({
+    "embedding",
+    "retrieval",
+    "reasoning_marking",
+    "recommendation"
+})
+
+
+# AI engines that MUST NOT execute during reporting
+# This is enforced centrally by the orchestrator to ensure reporting
+# only consumes persisted data without re-execution
+BLOCKED_ENGINES_DURING_REPORTING = frozenset({
+    "embedding",
+    "retrieval",
+    "reasoning_marking",
+    "recommendation",
+    "appeal_reconstruction"  # Appeals don't run during reporting
+})
 
 
 # Static pipeline definitions
@@ -43,6 +65,40 @@ PIPELINES: dict[PipelineName, list[str]] = {
         
         # Phase 6: Audit Trail
         "audit"
+    ],
+    
+    # PHASE B2: Appeal Reconstruction Pipeline
+    # CRITICAL: This pipeline is FORENSIC - NO AI engines allowed
+    # Order is immutable and legally significant
+    "appeal_reconstruction_v1": [
+        # Step 1: Verify requester is authorized (student/parent/school)
+        "identity_subscription",
+        
+        # Step 2: Load immutable audit evidence
+        "audit_compliance",
+        
+        # Step 3: Re-expose final marks (NO recalculation)
+        "results",
+        
+        # Step 4: Build human-readable explanation
+        "appeal_reconstruction"
+    ],
+    
+    # PHASE B3: Reporting & Institutional Outputs Pipeline
+    # CRITICAL: This pipeline is READ-ONLY - NO AI engines or recalculation allowed
+    # Order is immutable and legally significant
+    "reporting_v1": [
+        # Step 1: Verify requester role and enforce access scope
+        "identity_subscription",
+        
+        # Step 2: Load persisted final marks (NO recalculation)
+        "results",
+        
+        # Step 3: Load immutable audit snapshot and extract audit_reference
+        "audit_compliance",
+        
+        # Step 4: Build report (read-only), export if requested, attach audit_reference
+        "reporting"
     ]
 }
 
