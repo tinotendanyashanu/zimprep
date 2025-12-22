@@ -3,6 +3,7 @@
 This is the ONLY component that coordinates engine execution.
 """
 
+import inspect
 import logging
 from datetime import datetime
 from typing import Any
@@ -46,7 +47,7 @@ class Orchestrator:
     def __init__(self, registry):
         self.registry = registry
     
-    def execute_pipeline(
+    async def execute_pipeline(
         self,
         pipeline_name: str,
         payload: dict,
@@ -55,6 +56,7 @@ class Orchestrator:
         """Execute a full pipeline with all engines in canonical order.
         
         This is the PRIMARY execution method for production.
+        Supports both synchronous and asynchronous engines via polymorphic execution.
         
         Args:
             pipeline_name: Name of the pipeline to execute
@@ -136,8 +138,14 @@ class Orchestrator:
                         f"Engine '{engine_name}' not registered in orchestrator"
                     )
                 
-                # Execute engine
-                result = engine.run(payload, context)
+                # Execute engine (polymorphic: async or sync)
+                # This is the critical pattern that makes the orchestrator production-grade
+                if inspect.iscoroutinefunction(engine.run):
+                    # Engine is async - await it
+                    result = await engine.run(payload, context)
+                else:
+                    # Engine is sync - call directly
+                    result = engine.run(payload, context)
                 
                 # Validate output contract
                 if not isinstance(result, EngineResponse):

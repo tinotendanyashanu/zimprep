@@ -1,0 +1,172 @@
+﻿python : Traceback 
+(most recent call 
+last):
+At line:1 char:1
++ python 
+test_single_engine.py 
+2>&1 | Out-File 
+-Encoding utf8 
+-FilePath ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (Traceback    
+ (most recent call    
+ last)::String) [    
+], RemoteExceptio    n
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\test_single_engine.
+py", line 11, in 
+<module>
+    from app.engines.i
+dentity_subscription.e
+ngine import IdentityS
+ubscriptionEngine
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\engine.
+py", line 20, in 
+<module>
+    from app.engines.i
+dentity_subscription.s
+ervices import (
+    ...<6 lines>...
+    )
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\service
+s\__init__.py", line 
+3, in <module>
+    from app.engines.i
+dentity_subscription.s
+ervices.identity_resol
+ver import 
+IdentityResolver
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\service
+s\identity_resolver.py
+", line 11, in 
+<module>
+    from app.engines.i
+dentity_subscription.r
+epositories import (
+    ...<2 lines>...
+    )
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\__init__.py", 
+line 3, in <module>
+    from app.engines.i
+dentity_subscription.r
+epositories.user_repos
+itory import 
+UserRepository
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\user_repository.
+py", line 8, in 
+<module>
+    from app.engines.i
+dentity_subscription.r
+epositories.models 
+import User
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\models.py", 
+line 66, in <module>
+    class 
+Subscription(Base):
+    ...<37 lines>...
+        updated_at: 
+Mapped[datetime] = map
+ped_column(DateTime, 
+nullable=False)
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_api.py", 
+line 846, in 
+__init_subclass__
+    _as_declarative(cl
+s._sa_registry, cls, 
+cls.__dict__)
+    ~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 245, in 
+_as_declarative
+    return _MapperConf
+ig.setup_mapping(regis
+try, cls, dict_, 
+None, {})
+           ~~~~~~~~~~~
+~~~~~~~~~~~~~~~~^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 326, in 
+setup_mapping
+    return _ClassScanM
+apperConfig(
+        registry, 
+cls_, dict_, table, 
+mapper_kw
+    )
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 573, in __init__
+    self._extract_mapp
+able_attributes()
+    ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 1530, in _extrac
+t_mappable_attributes
+    raise exc.InvalidR
+equestError(
+    ...<2 lines>...
+    )
+sqlalchemy.exc.Invalid
+RequestError: 
+Attribute name 
+'metadata' is 
+reserved when using 
+the Declarative API.
+Importing identity_subscription engine...
+
+Error: Attribute name 'metadata' is reserved when using the Declarative API.
+
+Full traceback:

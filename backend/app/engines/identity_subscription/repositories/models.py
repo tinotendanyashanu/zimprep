@@ -4,6 +4,8 @@ Note: Actual database schema should be managed via migrations.
 This module defines the ORM models and data access patterns.
 """
 
+from __future__ import annotations
+
 from datetime import datetime
 from typing import Optional
 from sqlalchemy import String, DateTime, Boolean, Integer, JSON, Enum as SQLEnum
@@ -29,7 +31,7 @@ class User(Base):
         default="active",
         comment="active, inactive, suspended"
     )
-    role_override: Mapped[Optional[str]] = mapped_column(
+    role_override: Mapped[str | None] = mapped_column(
         String(20),
         nullable=True,
         comment="Override role if not derived from account"
@@ -81,22 +83,22 @@ class Subscription(Base):
     is_trial: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     
     start_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
-    end_date: Mapped[Optional[datetime]] = mapped_column(
+    end_date: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
         comment="Null for indefinite subscriptions"
     )
-    trial_end_date: Mapped[Optional[datetime]] = mapped_column(
+    trial_end_date: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True
     )
     
-    features: Mapped[Optional[dict]] = mapped_column(
+    features: Mapped[dict | None] = mapped_column(
         JSON,
         nullable=True,
         comment="JSON array of feature keys"
     )
-    metadata: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    extra_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -111,12 +113,12 @@ class FeatureFlagOverride(Base):
     user_id: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     feature_key: Mapped[str] = mapped_column(String(100), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    reason: Mapped[Optional[str]] = mapped_column(
+    reason: Mapped[str | None] = mapped_column(
         String(255),
         nullable=True,
         comment="Why this override exists"
     )
-    expires_at: Mapped[Optional[datetime]] = mapped_column(
+    expires_at: Mapped[datetime | None] = mapped_column(
         DateTime,
         nullable=True,
         comment="Override expiration"

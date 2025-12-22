@@ -1,0 +1,236 @@
+﻿python : Traceback 
+(most recent call 
+last):
+At line:1 char:1
++ python 
+test_single_engine.py 
+2>&1 | Out-File 
+-Encoding utf8 
+-FilePath ...
++ ~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo    
+          : NotSpeci  
+  fied: (Traceback    
+ (most recent call    
+ last)::String) [    
+], RemoteExceptio    n
+    + FullyQualifiedE 
+   rrorId : NativeCo  
+  mmandError
+ 
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\test_single_engine.
+py", line 11, in 
+<module>
+    from app.engines.i
+dentity_subscription.e
+ngine import IdentityS
+ubscriptionEngine
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\engine.
+py", line 20, in 
+<module>
+    from app.engines.i
+dentity_subscription.s
+ervices import (
+    ...<6 lines>...
+    )
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\service
+s\__init__.py", line 
+3, in <module>
+    from app.engines.i
+dentity_subscription.s
+ervices.identity_resol
+ver import 
+IdentityResolver
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\service
+s\identity_resolver.py
+", line 11, in 
+<module>
+    from app.engines.i
+dentity_subscription.r
+epositories import (
+    ...<2 lines>...
+    )
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\__init__.py", 
+line 3, in <module>
+    from app.engines.i
+dentity_subscription.r
+epositories.user_repos
+itory import 
+UserRepository
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\user_repository.
+py", line 8, in 
+<module>
+    from app.engines.i
+dentity_subscription.r
+epositories.models 
+import User
+  File "C:\Users\tinot
+\Desktop\zimprep\backe
+nd\app\engines\identit
+y_subscription\reposit
+ories\models.py", 
+line 18, in <module>
+    class User(Base):
+    ...<19 lines>...
+        updated_at: 
+Mapped[datetime] = map
+ped_column(DateTime, 
+nullable=False)
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_api.py", 
+line 836, in 
+__init_subclass__
+    _as_declarative(cl
+s._sa_registry, cls, 
+cls.__dict__)
+    ~~~~~~~~~~~~~~~^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 244, in 
+_as_declarative
+    return _MapperConf
+ig.setup_mapping(regis
+try, cls, dict_, 
+None, {})
+           ~~~~~~~~~~~
+~~~~~~~~~~~~~~~~^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^
+^^^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 325, in 
+setup_mapping
+    return _ClassScanM
+apperConfig(
+        registry, 
+cls_, dict_, table, 
+mapper_kw
+    )
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 572, in __init__
+    self._extract_mapp
+able_attributes()
+    ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~^^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\decl_base.py",
+ line 1570, in _extrac
+t_mappable_attributes
+    value.declarative_
+scan(
+    ~~~~~~~~~~~~~~~~~~
+~~~~^
+        self,
+        ^^^^^
+    ...<7 lines>...
+        is_dataclass,
+        ^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\properties.py"
+, line 709, in 
+declarative_scan
+    self._init_column_
+for_annotation(
+    ~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~^
+        cls,
+        ^^^^
+Importing identity_subscription engine...
+
+Error: descriptor '__getitem__' requires a 'typing.Union' object but received a 'tuple'
+
+Full traceback:
+    ...<2 lines>...
+        
+originating_module,
+        
+^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\orm\properties.py"
+, line 751, in _init_c
+olumn_for_annotation
+    argument = de_stri
+ngify_union_elements(
+        cls, 
+argument, 
+originating_module
+    )
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\util\typing.py", 
+line 341, in de_string
+ify_union_elements
+    return 
+make_union_type(
+        *[
+    ...<8 lines>...
+        ]
+    )
+  File "C:\Users\tinot
+\AppData\Local\Program
+s\Python\Python314\Lib
+\site-packages\sqlalch
+emy\util\typing.py", 
+line 478, in 
+make_union_type
+    return cast(Any, U
+nion).__getitem__(type
+s)  # type: ignore
+           ~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~^^^^^
+^^
+TypeError: descriptor 
+'__getitem__' 
+requires a 
+'typing.Union' object 
+but received a 'tuple'
