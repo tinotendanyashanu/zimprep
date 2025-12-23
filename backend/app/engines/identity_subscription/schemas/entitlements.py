@@ -28,20 +28,59 @@ class UserRole(str, Enum):
     """Teacher with class management capabilities."""
 
 
+class FeatureFlag(str, Enum):
+    """Feature flags for granular access control.
+    
+    Each flag represents a specific capability that can be enabled/disabled
+    based on subscription tier or administrative overrides.
+    """
+    
+    AI_MARKING_BASIC = "ai_marking_basic"
+    """Basic AI marking capabilities (available on FREE tier)."""
+    
+    AI_MARKING_DETAILED = "ai_marking_detailed"
+    """Detailed AI explanations and reasoning (STUDENT_PLUS+)."""
+    
+    APPEAL_ACCESS = "appeal_access"
+    """Right to request appeal reconstruction."""
+    
+    REPORT_EXPORT_PDF = "report_export_pdf"
+    """PDF report export capability."""
+    
+    REPORT_EXPORT_CSV = "report_export_csv"
+    """CSV data export (SCHOOL tier only)."""
+    
+    PARENT_VIEW = "parent_view"
+    """Parent/guardian access to student progress."""
+    
+    SCHOOL_DASHBOARD = "school_dashboard"
+    """Multi-student analytics dashboard."""
+    
+    HISTORICAL_ANALYTICS = "historical_analytics"
+    """Historical trend analysis across time periods."""
+
+
 class SubscriptionTier(str, Enum):
     """Subscription tier determining feature access.
     
     Each tier includes features from lower tiers plus additional capabilities.
+    Aligned with Phase B4 monetization strategy.
     """
     
     FREE = "free"
-    """Free tier with basic exam access."""
+    """Free tier with basic exam access and AI marking."""
     
-    PREMIUM = "premium"
-    """Premium tier with AI explanations and advanced analytics."""
+    STUDENT_PLUS = "student_plus"
+    """Student Plus tier with detailed AI explanations and appeals."""
     
     SCHOOL = "school"
     """School tier with unlimited access and administrative features."""
+    
+    INSTITUTION = "institution"
+    """Institution tier for multi-school deployments (future expansion)."""
+    
+    ADMIN = "admin"
+    """System administrator tier with full access."""
 
 
 class SubscriptionStatus(str, Enum):

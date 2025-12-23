@@ -4,7 +4,7 @@ Composes final entitlement decision from all policy evaluations.
 """
 
 import logging
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from app.engines.identity_subscription.schemas.output import IdentitySubscriptionOutput
 from app.engines.identity_subscription.schemas.denial_reasons import DenialReason
@@ -14,6 +14,9 @@ from app.engines.identity_subscription.schemas.entitlements import (
     SubscriptionState,
     UsageLimits,
 )
+
+if TYPE_CHECKING:
+    from app.engines.identity_subscription.schemas.output import EntitlementSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +33,8 @@ class PolicyComposer:
         usage_limits: UsageLimits,
         confidence: float = 1.0,
         cached: bool = False,
-        metadata: Optional[dict] = None
+        metadata: Optional[dict] = None,
+        entitlement_snapshot: Optional["EntitlementSnapshot"] = None,
     ) -> IdentitySubscriptionOutput:
         """Compose allowed decision.
         
@@ -43,6 +47,7 @@ class PolicyComposer:
             confidence: Confidence score (0.0-1.0)
             cached: Whether result was from cache
             metadata: Additional metadata
+            entitlement_snapshot: Immutable entitlement snapshot (Phase B4)
         
         Returns:
             IdentitySubscriptionOutput with allowed=True
@@ -53,6 +58,7 @@ class PolicyComposer:
             resolved_role=resolved_role,
             subscription_state=subscription_state,
             enabled_features=enabled_features,
+            entitlement_snapshot=entitlement_snapshot,
             usage_limits=usage_limits,
             denial_reason=None,
             denial_message=None,

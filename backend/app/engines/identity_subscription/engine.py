@@ -14,8 +14,15 @@ from app.contracts.trace import EngineTrace
 from app.orchestrator.execution_context import ExecutionContext
 
 from app.engines.identity_subscription.schemas.input import IdentitySubscriptionInput
-from app.engines.identity_subscription.schemas.output import IdentitySubscriptionOutput
+from app.engines.identity_subscription.schemas.output import (
+    IdentitySubscriptionOutput,
+    EntitlementSnapshot,
+)
 from app.engines.identity_subscription.schemas.denial_reasons import DenialReason
+from app.engines.identity_subscription.schemas.entitlements import (
+    SubscriptionTier,
+    FeatureFlag,
+)
 
 from app.engines.identity_subscription.services import (
     IdentityResolver,
@@ -24,6 +31,7 @@ from app.engines.identity_subscription.services import (
     FeaturePolicy,
     LimitPolicy,
     PolicyComposer,
+    EntitlementResolver,
 )
 
 from app.engines.identity_subscription.repositories import (
@@ -324,7 +332,36 @@ class IdentitySubscriptionEngine:
             trace_id=trace_id
         )
         
-        # 6. Evaluate feature policy
+        # 6. PHASE B4: Resolve entitlements using EntitlementResolver
+        # This is the SINGLE SOURCE OF TRUTH for feature access
+        tier = subscription_state.tier
+        feature_flags = EntitlementResolver.resolve(
+            tier=tier,
+            overrides=feature_overrides
+        )
+        
+        # 7. PHASE B4: Create immutable entitlement snapshot
+        entitlement_snapshot = EntitlementSnapshot(
+            subscription_tier=tier,
+            features={flag.value: enabled for flag, enabled in feature_flags.items()},
+            resolved_at=datetime.utcnow(),
+            expires_at=subscription_state.end_date
+        )
+        
+        # 8. PHASE B4: Attach snapshot to ExecutionContext for downstream engines
+        # This snapshot is FROZEN for the entire request lifecycle
+        context.feature_flags_snapshot = entitlement_snapshot.features.copy()
+        
+        logger.info(
+            f"Entitlements resolved: tier={tier.value}",
+            extra={
+                "trace_id": trace_id,
+                "tier": tier.value,
+                "enabled_features": len([f for f in feature_flags.values() if f])
+            }
+        )
+        
+        # 9. Evaluate feature policy (backward compatibility)
         feature_allowed, required_feature = FeaturePolicy.evaluate(
             subscription_state=subscription_state,
             feature_overrides=feature_overrides,
@@ -344,7 +381,7 @@ class IdentitySubscriptionEngine:
                 confidence=confidence,
             )
         
-        # 7. Evaluate usage limits
+        # 10. Evaluate usage limits
         limit_allowed, usage_limits = await self.limit_policy.evaluate(
             subscription_state=subscription_state,
             user_id=resolved_identity.user_id,
@@ -365,13 +402,13 @@ class IdentitySubscriptionEngine:
                 confidence=confidence,
             )
         
-        # 8. Get all enabled features
-        enabled_features = FeaturePolicy.get_enabled_features(
-            subscription_state=subscription_state,
-            feature_overrides=feature_overrides
+        # 11. Get all enabled features
+        enabled_features = EntitlementResolver.get_enabled_features(
+            tier=tier,
+            overrides=feature_overrides
         )
         
-        # 9. Compose allowed decision
+        # 12. Compose allowed decision with entitlement snapshot
         return self.policy_composer.compose_allowed(
             resolved_identity=resolved_identity,
             resolved_role=resolved_role,
@@ -379,6 +416,7 @@ class IdentitySubscriptionEngine:
             enabled_features=enabled_features,
             usage_limits=usage_limits,
             confidence=confidence,
+            entitlement_snapshot=entitlement_snapshot,
         )
     
     def _build_response(

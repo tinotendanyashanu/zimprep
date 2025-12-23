@@ -79,6 +79,32 @@ class ReportingIntegrityError(Exception):
         self.trace_id = trace_id
 
 
+class AccessDeniedError(Exception):
+    """Raised when feature access is denied based on subscription entitlements.
+    
+    CRITICAL: This error is thrown when a pipeline requires a feature flag
+    that is not enabled in the user's subscription tier (Phase B4).
+    """
+    
+    def __init__(
+        self,
+        message: str,
+        trace_id: str | None = None,
+        required_feature: str | None = None
+    ):
+        super().__init__(message)
+        self.trace_id = trace_id
+        self.required_feature = required_feature
+
+
+# PHASE B4: Pipeline-level feature guards
+# Maps pipeline names to required feature flags
+PIPELINE_FEATURE_GUARDS: dict[str, list[str]] = {
+    "appeal_reconstruction_v1": ["appeal_access"],
+    # Add more pipeline guards as needed
+}
+
+
 class Orchestrator:
     """Central orchestrator for managing engine execution.
     
@@ -170,6 +196,9 @@ class Orchestrator:
         # CRITICAL: Enforce AI engine blocking for appeal pipelines
         is_appeal_pipeline = "appeal" in pipeline_name.lower()
         is_reporting_pipeline = "reporting" in pipeline_name.lower()
+        
+        # PHASE B4: Validate pipeline entitlements BEFORE execution
+        self._validate_pipeline_entitlements(pipeline_name, context, trace_id)
         
         if is_appeal_pipeline:
             self._validate_appeal_pipeline_integrity(
@@ -453,6 +482,88 @@ class Orchestrator:
                     blocked_engine=engine_name,
                     trace_id=trace_id
                 )
+    
+    def _validate_pipeline_entitlements(
+        self,
+        pipeline_name: str,
+        context: ExecutionContext,
+        trace_id: str
+    ) -> None:
+        """Validate pipeline-level feature entitlements.
+        
+        PHASE B4: This enforces feature access at pipeline entry.
+        Pipelines requiring specific features MUST have them enabled
+        in the user's entitlement snapshot.
+        
+        Args:
+            pipeline_name: Name of the pipeline being executed
+            context: Execution context with feature_flags_snapshot
+            trace_id: Request trace ID for logging
+            
+        Raises:
+            AccessDeniedError: If required feature not enabled
+        """
+        required_features = PIPELINE_FEATURE_GUARDS.get(pipeline_name, [])
+        
+        for feature in required_features:
+            if not context.feature_flags_snapshot.get(feature, False):
+                logger.error(
+                    f"Pipeline access denied: '{pipeline_name}' requires '{feature}'",
+                    extra={
+                        "trace_id": trace_id,
+                        "pipeline_name": pipeline_name,
+                        "required_feature": feature,
+                        "snapshot": context.feature_flags_snapshot
+                    }
+                )
+                raise AccessDeniedError(
+                    f"Pipeline '{pipeline_name}' requires feature '{feature}' "
+                    f"which is not available in your subscription",
+                    trace_id=trace_id,
+                    required_feature=feature
+                )
+        
+        if required_features:
+            logger.info(
+                f"Pipeline entitlements validated: {required_features}",
+                extra={"trace_id": trace_id, "pipeline_name": pipeline_name}
+            )
+    
+    def _enforce_feature(
+        self,
+        feature: str,
+        context: ExecutionContext,
+        trace_id: str
+    ) -> None:
+        """Enforce feature access based on entitlement snapshot.
+        
+        PHASE B4: This is the centralized enforcement point for action-level
+        feature checks (e.g., PDF export, CSV export).
+        All feature checks MUST go through this method.
+        Engines NEVER check features themselves.
+        
+        Args:
+            feature: Feature flag key to check (e.g., 'report_export_pdf')
+            context: Execution context with feature_flags_snapshot
+            trace_id: Trace ID for logging
+            
+        Raises:
+            AccessDeniedError: If feature not enabled in snapshot
+        """
+        if not context.feature_flags_snapshot.get(feature, False):
+            logger.error(
+                f"Access denied: feature '{feature}' not enabled",
+                extra={
+                    "trace_id": trace_id,
+                    "feature": feature,
+                    "snapshot": context.feature_flags_snapshot
+                }
+            )
+            raise AccessDeniedError(
+                f"Feature '{feature}' not available for current subscription",
+                trace_id=trace_id,
+                required_feature=feature
+            )
 
 
 # Global orchestrator instance

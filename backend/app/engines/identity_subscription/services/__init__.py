@@ -6,6 +6,7 @@ from app.engines.identity_subscription.services.subscription_resolver import Sub
 from app.engines.identity_subscription.services.feature_policy import FeaturePolicy
 from app.engines.identity_subscription.services.limit_policy import LimitPolicy
 from app.engines.identity_subscription.services.policy_composer import PolicyComposer
+from app.engines.identity_subscription.services.entitlement_resolver import EntitlementResolver
 
 __all__ = [
     "IdentityResolver",
@@ -14,4 +15,5 @@ __all__ = [
     "FeaturePolicy",
     "LimitPolicy",
     "PolicyComposer",
+    "EntitlementResolver",
 ]

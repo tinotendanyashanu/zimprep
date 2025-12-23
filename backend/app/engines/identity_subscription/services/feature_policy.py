@@ -48,7 +48,7 @@ TIER_FEATURES = {
         "basic_analytics",
         "practice_mode",
     ],
-    SubscriptionTier.PREMIUM: [
+    SubscriptionTier.STUDENT_PLUS: [
         "exam_access",
         "basic_analytics",
         "practice_mode",

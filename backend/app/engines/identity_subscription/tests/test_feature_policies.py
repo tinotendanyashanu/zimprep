@@ -73,7 +73,7 @@ def test_premium_tier_ai_explanation_allowed():
     """Test premium tier can access AI explanations."""
     subscription_state = SubscriptionState(
         subscription_id="sub-123",
-        tier=SubscriptionTier.PREMIUM,
+        tier=SubscriptionTier.STUDENT_PLUS,
         status=SubscriptionStatus.ACTIVE,
         start_date=datetime.utcnow(),
         end_date=None,
@@ -126,7 +126,7 @@ def test_feature_override_disables_access():
     """Test feature override can disable access even if in tier."""
     subscription_state = SubscriptionState(
         subscription_id="sub-123",
-        tier=SubscriptionTier.PREMIUM,
+        tier=SubscriptionTier.STUDENT_PLUS,
         status=SubscriptionStatus.ACTIVE,
         start_date=datetime.utcnow(),
         end_date=None,

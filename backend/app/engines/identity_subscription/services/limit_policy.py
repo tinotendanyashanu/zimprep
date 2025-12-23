@@ -26,7 +26,7 @@ TIER_LIMITS = {
         "analytics_exports_per_month": 0,
         "practice_sessions_per_day": 10,
     },
-    SubscriptionTier.PREMIUM: {
+    SubscriptionTier.STUDENT_PLUS: {
         "exams_per_day": 999999,  # Unlimited
         "ai_explanations_per_week": 50,
         "analytics_exports_per_month": 10,
