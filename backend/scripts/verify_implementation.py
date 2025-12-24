@@ -4,15 +4,15 @@
 Run this to verify authentication, RBAC, and override functionality.
 """
 
-import jwt
+from jose import jwt
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import sys
 
 
 # Configuration
 BASE_URL = "http://localhost:8000"
-JWT_SECRET = "CHANGE-THIS-IN-PRODUCTION-USE-LONG-RANDOM-STRING-MIN-32-CHARS"  # Change to your secret
+JWT_SECRET = "dev-secret-min-32-chars-for-local-development-only"  # Matches .env
 
 
 def generate_token(user_id: str, role: str, email: str = None) -> str:
@@ -21,7 +21,7 @@ def generate_token(user_id: str, role: str, email: str = None) -> str:
         "sub": user_id,
         "role": role,
         "email": email or f"{role}@test.com",
-        "exp": datetime.utcnow() + timedelta(hours=1)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm="HS256")
 
@@ -51,7 +51,7 @@ def test_authentication():
     payload = {
         "sub": "user_001",
         "email": "test@example.com",
-        "exp": datetime.utcnow() + timedelta(hours=1)
+        "exp": datetime.now(timezone.utc) + timedelta(hours=1)
     }
     token_no_role = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
     response = requests.get(

@@ -8,6 +8,9 @@ CRITICAL: This module integrates:
 5. Environment validation on startup
 """
 
+# CRITICAL: Must be first import for Python 3.14 compatibility
+import app.compat_patch  # noqa: F401
+
 from fastapi import FastAPI
 import logging
 import structlog

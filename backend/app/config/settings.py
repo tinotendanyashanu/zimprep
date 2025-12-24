@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///:memory:"
     
     # MongoDB connection string (REQUIRED in production)
-    MONGODB_URI: str = "mongodb://localhost:27017"
+    MONGODB_URI: str = "mongodb://zimprep:zimprep@localhost:27017/zimprep?authSource=admin"
     
     # Redis for caching and rate limiting
     REDIS_URL: str = "redis://localhost:6379/0"

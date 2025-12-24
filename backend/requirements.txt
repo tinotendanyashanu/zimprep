@@ -13,6 +13,7 @@ asyncpg==0.30.0
 
 # Database - MongoDB
 pymongo==4.10.1
+motor==3.7.1  # Async MongoDB driver
 
 # Redis for caching
 redis>=5.0.0
@@ -31,10 +32,15 @@ python-multipart==0.0.20
 
 # HTTP client
 httpx==0.28.1
+requests>=2.32.0  # For verification scripts
+
+# AI/LLM
+openai>=2.14.0  # OpenAI API client
 
 # Utilities
 tenacity==9.0.0
 structlog==24.4.0
+psutil>=7.2.0  # System and process utilities
 
 # PHASE B5: Observability
 prometheus-client==0.20.0
@@ -46,4 +52,3 @@ pytest-asyncio==0.24.0
 # Embedding model (AI Engines)
 sentence-transformers>=2.2.0
 torch>=2.0.0
-

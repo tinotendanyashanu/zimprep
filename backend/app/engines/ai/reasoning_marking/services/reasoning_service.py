@@ -43,7 +43,9 @@ class ReasoningService:
     
     def __init__(self):
         """Initialize OpenAI client."""
-        api_key = os.getenv("OPENAI_API_KEY")
+        from app.config.settings import settings
+        
+        api_key = settings.OPENAI_API_KEY
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
         

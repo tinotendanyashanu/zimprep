@@ -85,9 +85,10 @@ class RecommendationEngineAdapter:
         Returns:
             LLM client instance
         """
+        from app.config.settings import settings
         
         # Check for OpenAI
-        openai_key = os.getenv("OPENAI_API_KEY")
+        openai_key = settings.OPENAI_API_KEY
         if openai_key:
             try:
                 import openai
@@ -96,8 +97,8 @@ class RecommendationEngineAdapter:
                 logger.error("openai package not installed")
                 raise RuntimeError("openai package required but not installed")
         
-        # Check for Anthropic
-        anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+        # Check for Anthropic (optional)
+        anthropic_key = os.getenv("ANTHROPIC_API_KEY")  # Not in settings yet
         if anthropic_key:
             try:
                 import anthropic
