@@ -140,20 +140,69 @@ class ResultsEngine:
             total_marks = AggregationService.calculate_subject_total(input_data.papers)
             logger.info("Calculated subject total: %.2f", total_marks)
             
+            # PHASE 3: Apply overrides if present
+            overrides_applied = []
+            has_overrides = False
+            adjusted_total = total_marks
+            
+            if self.repository:
+                try:
+                    # Load overrides from database
+                    from pymongo import MongoClient
+                    from app.config.settings import settings
+                    mongo_client = MongoClient(settings.MONGODB_URI)
+                    db = mongo_client.zimprep
+                    
+                    override_docs = list(db.mark_overrides.find({"trace_id": trace_id}))
+                    
+                    if override_docs:
+                        has_overrides = True
+                        for override in override_docs:
+                            mark_adjustment = override["adjusted_mark"] - override["original_mark"]
+                            adjusted_total += mark_adjustment
+                            overrides_applied.append({
+                                "override_id": override["override_id"],
+                                "question_id": override["question_id"],
+                                "original_mark": override["original_mark"],
+                                "adjusted_mark": override["adjusted_mark"],
+                                "adjustment": mark_adjustment,
+                                "overridden_by": override["overridden_by_user_id"],
+                                "reason": override["override_reason"]
+                            })
+                        
+                        logger.info(
+                            "Applied %d override(s): original_total=%.2f, adjusted_total=%.2f",
+                            len(override_docs),
+                            total_marks,
+                            adjusted_total
+                        )
+                    
+                    mongo_client.close()
+                except Exception as e:
+                    logger.warning("Failed to load overrides: %s", str(e))
+            
+            # Use adjusted total if overrides present
+            final_total = adjusted_total if has_overrides else total_marks
+            
             # ============================================================
-            # STEP 6: Resolve grade via grading scale
+            # STEP 6: Resolve grade via grading scale (using final total)
             # ============================================================
             grade = GradingService.resolve_grade(
-                total_marks=total_marks,
+                total_marks=final_total,
                 grading_scale=input_data.grading_scale
             )
             
             pass_status = GradingService.determine_pass_status(
-                total_marks=total_marks,
+                total_marks=final_total,
                 grading_scale=input_data.grading_scale
             )
             
-            logger.info("Grade resolved: %s (pass: %s)", grade, pass_status)
+            logger.info(
+                "Grade resolved: %s (pass: %s) %s",
+                grade,
+                pass_status,
+                f"[OVERRIDDEN: {len(overrides_applied)} adjustment(s)]" if has_overrides else ""
+            )
             
             # ============================================================
             # STEP 7: Build topic & paper breakdowns
@@ -162,33 +211,112 @@ class ResultsEngine:
                 papers=input_data.papers
             )
             
-            # Calculate overall percentage
+            # Calculate overall percentage (using final total)
             percentage = AggregationService.calculate_percentage(
-                awarded_marks=total_marks,
+                awarded_marks=final_total,
                 max_marks=input_data.grading_scale.max_total_marks
             )
             
-            # Build output
-            output = ResultsOutput(
-                trace_id=trace_id,
-                engine_name=ENGINE_NAME,
-                engine_version=ENGINE_VERSION,
-                candidate_id=input_data.candidate_id,
-                exam_id=input_data.exam_id,
-                subject_code=input_data.subject_code,
-                subject_name=input_data.subject_name,
-                syllabus_version=input_data.syllabus_version,
-                total_marks=total_marks,
-                max_total_marks=input_data.grading_scale.max_total_marks,
-                percentage=percentage,
-                grade=grade,
-                pass_status=pass_status,
-                paper_results=paper_results,
-                topic_breakdown=topic_breakdown,
-                confidence=1.0,  # Always 1.0 for deterministic operations
-                issued_at=datetime.utcnow(),
-                notes=input_data.notes
-            )
+            # Build output with override metadata
+            output_dict = {
+                "trace_id": trace_id,
+                "engine_name": ENGINE_NAME,
+                "engine_version": ENGINE_VERSION,
+                "candidate_id": input_data.candidate_id,
+                "exam_id": input_data.exam_id,
+                "subject_code": input_data.subject_code,
+                "subject_name": input_data.subject_name,
+                "syllabus_version": input_data.syllabus_version,
+                "total_marks": final_total,  # Final marks (after overrides)
+                "max_total_marks": input_data.grading_scale.max_total_marks,
+                "percentage": percentage,
+                "grade": grade,
+                "pass_status": pass_status,
+                "paper_results": paper_results,
+                "topic_breakdown": topic_breakdown,
+                "confidence": 1.0,
+                "issued_at": datetime.utcnow(),
+                "notes": input_data.notes
+            }
+            
+            # Add override metadata if present
+            if has_overrides:
+                output_dict["original_total_marks"] = total_marks  # Pre-override marks
+                output_dict["overrides_applied"] = overrides_applied
+                output_dict["has_overrides"] = True
+            
+            output = ResultsOutput(**output_dict)
+            
+            # PHASE 4: Create grade boundary snapshot (immutable config for appeals)
+            try:
+                from app.engines.results.schemas.boundaries import (
+                    GradeBoundarySnapshot,
+                    ExamConfigSnapshot
+                )
+                from uuid import uuid4
+                
+                # Create boundary snapshot
+                boundary_snapshot = GradeBoundarySnapshot(
+                    snapshot_id=f"gb_{uuid4().hex[:12]}",
+                    exam_id=input_data.exam_id,
+                    subject=input_data.subject_code,
+                    boundaries={
+                        grade_level.grade: grade_level.min_percentage
+                        for grade_level in input_data.grading_scale.grade_levels
+                    },
+                    created_at=datetime.utcnow(),
+                    trace_id=trace_id,
+                    version="1.0",
+                    source="zimbabwe_national_curriculum"
+                )
+                
+                # Create exam config snapshot
+                config_snapshot = ExamConfigSnapshot(
+                    config_id=f"cfg_{uuid4().hex[:12]}",
+                    exam_id=input_data.exam_id,
+                    paper_weightings={
+                        paper.paper_code: paper.weighting
+                        for paper in input_data.papers
+                    },
+                    rubric_version=input_data.syllabus_version,
+                    created_at=datetime.utcnow(),
+                    trace_id=trace_id,
+                    time_allowance_minutes=None,  # Could be added to input
+                    negative_marking=False
+                )
+                
+                logger.info(
+                    "Created immutable config snapshots for appeal reconstruction",
+                    extra={
+                        "trace_id": trace_id,
+                        "boundary_snapshot_id": boundary_snapshot.snapshot_id,
+                        "config_snapshot_id": config_snapshot.config_id
+                    }
+                )
+                
+                # Store snapshots in MongoDB if repository available
+                if self.repository:
+                    from pymongo import MongoClient
+                    from app.config.settings import settings
+                    mongo_client = MongoClient(settings.MONGODB_URI)
+                    db = mongo_client.zimprep
+                    
+                    db.grade_boundary_snapshots.insert_one(boundary_snapshot.model_dump())
+                    db.exam_config_snapshots.insert_one(config_snapshot.model_dump())
+                    
+                    mongo_client.close()
+                    
+                    logger.info(
+                        "Persisted config snapshots to database",
+                        extra={"trace_id": trace_id}
+                    )
+                
+            except Exception as e:
+                # Don't fail result calculation if snapshot fails
+                logger.warning(
+                    f"Failed to create config snapshots: {str(e)}",
+                    extra={"trace_id": trace_id}
+                )
             
             # ============================================================
             # STEP 8: Persist immutable result

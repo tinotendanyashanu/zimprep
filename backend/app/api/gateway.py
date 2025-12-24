@@ -67,13 +67,41 @@ async def execute_pipeline(
         feature_flags={}  # Could be fetched from feature flag service
     )
     
+    # PHASE 1: RBAC - Validate role can access pipeline
+    from app.orchestrator.pipelines import PIPELINE_ROLE_REQUIREMENTS
+    
+    allowed_roles = PIPELINE_ROLE_REQUIREMENTS.get(request.pipeline_name, [])
+    
+    # Admin role bypasses all role checks
+    if current_user.role != "admin" and current_user.role not in allowed_roles:
+        logger.warning(
+            f"Access denied: role '{current_user.role}' cannot access pipeline '{request.pipeline_name}'",
+            extra={
+                "user_id": current_user.id,
+                "role": current_user.role,
+                "pipeline": request.pipeline_name,
+                "allowed_roles": allowed_roles,
+                "trace_id": context.trace_id
+            }
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "error": "Access denied",
+                "message": f"Your role '{current_user.role}' is not authorized to access this pipeline",
+                "pipeline": request.pipeline_name,
+                "allowed_roles": allowed_roles
+            }
+        )
+    
     logger.info(
         "Pipeline execution request received",
         extra={
             "pipeline_name": request.pipeline_name,
             "trace_id": context.trace_id,
             "request_id": context.request_id,
-            "user_id": current_user.id
+            "user_id": current_user.id,
+            "role": current_user.role
         }
     )
     

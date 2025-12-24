@@ -213,6 +213,22 @@ class ResultsOutput(BaseModel):
         description="Optional notes for audit trail"
     )
     
+    # PHASE 3: Override metadata (optional, only present if overrides applied)
+    original_total_marks: Optional[float] = Field(
+        None,
+        description="Original AI-calculated total before any overrides"
+    )
+    
+    has_overrides: Optional[bool] = Field(
+        None,
+        description="Whether any examiner overrides were applied"
+    )
+    
+    overrides_applied: Optional[List[dict]] = Field(
+        None,
+        description="List of override details if any were applied"
+    )
+    
     class Config:
         """Pydantic configuration."""
         frozen = True  # Make output immutable

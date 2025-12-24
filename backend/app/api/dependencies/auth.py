@@ -19,10 +19,11 @@ security = HTTPBearer()
 
 
 class User(BaseModel):
-    """Authenticated user model."""
+    """Authenticated user model with role for RBAC."""
     
     id: str
     email: str | None = None
+    role: str  # Required for RBAC: student, parent, school_admin, examiner, admin
     
     class Config:
         frozen = True
@@ -68,12 +69,27 @@ async def get_current_user(
         # Extract optional email
         email: str | None = payload.get("email")
         
+        # Extract REQUIRED role claim (RBAC enforcement)
+        role: str | None = payload.get("role")
+        if role is None:
+            logger.warning("JWT token missing 'role' claim")
+            raise credentials_exception
+        
+        # Validate role against allowed values
+        allowed_roles = {"student", "parent", "school_admin", "examiner", "admin"}
+        if role not in allowed_roles:
+            logger.warning(
+                f"JWT token contains invalid role: {role}",
+                extra={"user_id": user_id, "invalid_role": role}
+            )
+            raise credentials_exception
+        
         logger.info(
             "User authenticated successfully",
-            extra={"user_id": user_id}
+            extra={"user_id": user_id, "role": role}
         )
         
-        return User(id=user_id, email=email)
+        return User(id=user_id, email=email, role=role)
         
     except JWTError as e:
         logger.warning(

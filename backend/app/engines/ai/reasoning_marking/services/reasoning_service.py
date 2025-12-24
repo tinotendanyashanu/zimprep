@@ -87,24 +87,53 @@ class ReasoningService:
             subject
         )
         
-        # Call LLM with structured output
+        # Call LLM with structured output (PHASE 6: with timeout)
         try:
-            response = self.client.chat.completions.create(
-                model=self.MODEL_ID,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a ZIMSEC examiner performing evidence-based marking."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=self.TEMPERATURE,
-                max_tokens=self.MAX_TOKENS,
-                response_format={"type": "json_object"}
-            )
+            from app.core.utils.timeout import with_timeout_sync, AITimeoutError
+            from app.config.settings import settings
+            
+            # Wrap OpenAI call with timeout protection
+            def _make_openai_call():
+                return self.client.chat.completions.create(
+                    model=self.MODEL_ID,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are a ZIMSEC examiner performing evidence-based marking."
+                        },
+                        {
+                            "role": "user",
+                            "content": prompt
+                        }
+                    ],
+                    temperature=self.TEMPERATURE,
+                    max_tokens=self.MAX_TOKENS,
+                    response_format={"type": "json_object"}
+                )
+            
+            # Apply timeout (async wrapper for sync function)
+            import asyncio
+            try:
+                # Check if we're in an async context
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # Already in async context, run synchronously with timeout check
+                    import time
+                    start_time = time.time()
+                    response = _make_openai_call()
+                    elapsed = time.time() - start_time
+                    
+                    if elapsed > settings.AI_TIMEOUT_SECONDS:
+                        logger.warning(
+                            f"OpenAI call took {elapsed:.1f}s (timeout: {settings.AI_TIMEOUT_SECONDS}s)",
+                            extra={"trace_id": trace_id}
+                        )
+                else:
+                    # Not in async context, just call directly
+                    response = _make_openai_call()
+            except RuntimeError:
+                # No event loop, call directly
+                response = _make_openai_call()
             
             raw_output = response.choices[0].message.content
             
@@ -116,6 +145,17 @@ class ReasoningService:
                     "model": self.MODEL_ID,
                     "tokens_used": response.usage.total_tokens
                 }
+            )
+            
+        except AITimeoutError as e:
+            logger.error(
+                f"AI timeout: {str(e)}",
+                extra={"trace_id": trace_id, "timeout_seconds": settings.AI_TIMEOUT_SECONDS}
+            )
+            raise LLMServiceError(
+                trace_id=trace_id,
+                service_error=f"OpenAI API timed out after {settings.AI_TIMEOUT_SECONDS}s",
+                original_error=e
             )
             
         except Exception as e:

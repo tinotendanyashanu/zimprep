@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_MINUTES: int = 30
     
+    # ===== AI ENGINE TIMEOUTS (PHASE 6) =====
+    # Maximum time to wait for AI API responses before failing gracefully
+    AI_TIMEOUT_SECONDS: int = 30
+    
     # ===== BILLING INTEGRATION (REQUIRED) =====
     # Webhook secret for billing provider callbacks
     BILLING_WEBHOOK_SECRET: str = ""

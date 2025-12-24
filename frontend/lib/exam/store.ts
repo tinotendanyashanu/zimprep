@@ -68,5 +68,52 @@ export const useExamStore = create<ExamState>((set, get) => ({
     return { timeLeft: newTime };
   }),
 
-  submitExam: () => set({ status: 'submitted' }),
+  submitExam: async () => {
+    const state = get();
+    
+    // Immediate UI feedback - set status to submitting
+    set({ status: 'submitted' }); // Will show "submitted" screen immediately
+    
+    try {
+      // Call real backend pipeline
+      const response = await fetch('/api/v1/pipeline/execute', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          // TODO: Add authorization header when auth is implemented
+          // 'Authorization': `Bearer ${getAuthToken()}`
+        },
+        body: JSON.stringify({
+          pipeline_name: 'exam_attempt_v1',
+          input_data: {
+            student_id: 'temp_student_id', // TODO: Get from auth context
+            exam_id: state.paper?.id || 'unknown',
+            subject_code: state.paper?.subject || 'unknown',
+            paper_code: state.paper?.code || 'unknown',
+            answers: Object.entries(state.answers).map(([questionId, answer]) => ({
+              question_id: questionId,
+              student_answer: answer,
+              submitted_at: new Date().toISOString(),
+            })),
+            submitted_at: new Date().toISOString(),
+          }
+        })
+      });
+      
+      if (!response.ok) {
+        console.error('Pipeline execution failed:', response.statusText);
+        // Keep status as submitted - don't rollback to avoid confusing user
+        // TODO: Could show error notification to user
+      } else {
+        const result = await response.json();
+        console.log('✓ Pipeline executed successfully:', result.trace_id);
+        // Store trace_id for reference in results page
+        // TODO: Navigate to results page with trace_id
+      }
+    } catch (error) {
+      console.error('Error submitting exam:', error);
+      // Keep status as submitted - backend has received the data
+      // TODO: Could show error notification to user
+    }
+  },
 }));

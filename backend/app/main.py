@@ -22,6 +22,7 @@ from app.config.settings import settings
 from app.api.gateway import router as gateway_router
 from app.api.routes.health import router as health_router
 from app.api.routes.metrics import router as metrics_router
+from app.api.routes.overrides import router as overrides_router  # PHASE 3: Override routes
 from app.engines.ai.recommendation.routes import router as recommendation_router
 
 
@@ -47,10 +48,15 @@ app.add_middleware(TracingMiddleware)
 # 2. Audit mode middleware enforces read-only operations
 app.add_middleware(AuditModeMiddleware)
 
+# PHASE 6: Rate limiting middleware (prevent abuse)
+from app.core.middleware.rate_limit import RateLimitMiddleware
+app.add_middleware(RateLimitMiddleware)
+
 # Include routers
 app.include_router(health_router)
 app.include_router(metrics_router)  # PHASE B5: Metrics endpoint
 app.include_router(gateway_router)
+app.include_router(overrides_router)  # PHASE 3: Override routes
 app.include_router(recommendation_router)
 
 
@@ -65,10 +71,19 @@ async def startup_event():
     
     # Import engines
     from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
+    from app.engines.exam_structure.engine import ExamStructureEngine
+    from app.engines.session_timing.engine import SessionTimingEngine
+    from app.engines.question_delivery.engine import QuestionDeliveryEngine
+    from app.engines.submission.engine import SubmissionEngine
+    from app.engines.ai.embedding.engine import EmbeddingEngine
+    from app.engines.ai.retrieval.engine import RetrievalEngine
+    from app.engines.ai.reasoning_marking.engine import ReasoningMarkingEngine
+    from app.engines.ai.validation_consistency.engine import ValidationConsistencyEngine
     from app.engines.ai.recommendation import get_recommendation_engine
     from app.engines.reporting_analytics.reporting_adapter import ReportingEngineAdapter
     from app.engines.results.engine import ResultsEngine
     from app.engines.audit_compliance.engine import AuditComplianceEngine
+    from app.engines.background_processing.engine import BackgroundProcessingEngine
     from app.orchestrator.engine_registry import engine_registry
     
     # Register Identity & Subscription Engine
@@ -77,6 +92,62 @@ async def startup_event():
         IdentitySubscriptionEngine()
     )
     logger.info("✓ Registered identity_subscription engine")
+    
+    # Register Exam Structure Engine
+    engine_registry.register(
+        "exam_structure",
+        ExamStructureEngine()
+    )
+    logger.info("✓ Registered exam_structure engine")
+    
+    # Register Session Timing Engine
+    engine_registry.register(
+        "session_timing",
+        SessionTimingEngine()
+    )
+    logger.info("✓ Registered session_timing engine")
+    
+    # Register Question Delivery Engine
+    engine_registry.register(
+        "question_delivery",
+        QuestionDeliveryEngine()
+    )
+    logger.info("✓ Registered question_delivery engine")
+    
+    # Register Submission Engine
+    engine_registry.register(
+        "submission",
+        SubmissionEngine()
+    )
+    logger.info("✓ Registered submission engine")
+    
+    # Register Embedding Engine (AI)
+    engine_registry.register(
+        "embedding",
+        EmbeddingEngine()
+    )
+    logger.info("✓ Registered embedding engine")
+    
+    # Register Retrieval Engine (AI)
+    engine_registry.register(
+        "retrieval",
+        RetrievalEngine()
+    )
+    logger.info("✓ Registered retrieval engine")
+    
+    # Register Reasoning & Marking Engine (AI)
+    engine_registry.register(
+        "reasoning_marking",
+        ReasoningMarkingEngine()
+    )
+    logger.info("✓ Registered reasoning_marking engine")
+    
+    # Register Validation & Consistency Engine (AI)
+    engine_registry.register(
+        "validation",
+        ValidationConsistencyEngine()
+    )
+    logger.info("✓ Registered validation engine")
     
     # Register Recommendation Engine
     engine_registry.register(
@@ -106,10 +177,17 @@ async def startup_event():
     )
     logger.info("✓ Registered audit_compliance engine")
     
+    # Register Background Processing Engine
+    engine_registry.register(
+        "background_processing",
+        BackgroundProcessingEngine()
+    )
+    logger.info("✓ Registered background_processing engine")
+    
     # Log startup summary
     logger.info(
         "=== ZimPrep Backend Started Successfully ===",
-        engines_registered=5,
+        engines_registered=14,
         audit_mode_enabled=settings.AUDIT_MODE,
         observability_enabled=True,
         environment=settings.ENV,

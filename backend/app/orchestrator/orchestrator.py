@@ -298,40 +298,54 @@ class Orchestrator:
                         extra={
                             "engine_name": engine_name,
                             "trace_id": trace_id,
-                            "error": result.error
-                        }
-                    )
-                    raise PipelineExecutionError(
-                        message=error_msg,
-                        pipeline_name=pipeline_name,
-                        failed_engine=engine_name,
+            )
+            
+            # Get engine instance
+            engine = self.registry.get_engine(engine_name)
+            if not engine:
+                error_msg = f"Engine '{engine_name}' not registered"
+                logger.error(
+                    f"[{trace_id}] {error_msg}",
+                    extra={"trace_id": trace_id, "engine_name": engine_name}
+                )
+                raise ValueError(error_msg)
+            
+            # Execute engine with retry logic (PHASE 6: operational robustness)
+            try:
+                from app.core.utils.retry import retry_with_backoff
+                
+                # Wrap engine execution with retry
+                async def _execute_engine_with_retry():
+                    return await self._execute_single_engine(
+                        engine=engine,
+                        engine_name=engine_name,
+                        payload=payload,
+                        context=context,
                         trace_id=trace_id
                     )
                 
-            except PipelineExecutionError:
-                # Re-raise pipeline errors
-                raise
-                
-            except Exception as e:
-                engine_end = datetime.utcnow()
-                duration_ms = (engine_end - engine_start).total_seconds() * 1000
-                
-                error_msg = f"Engine '{engine_name}' crashed: {str(e)}"
-                logger.exception(
-                    "Engine execution crashed",
-                    extra={
-                        "engine_name": engine_name,
-                        "trace_id": trace_id,
-                        "duration_ms": duration_ms
-                    }
+                # Apply retry for transient failures
+                response = await retry_with_backoff(
+                    _execute_engine_with_retry,
+                    max_attempts=3,
+                    initial_delay=1.0,
+                    backoff_factor=2.0,
+                    operation_name=f"engine_{engine_name}",
+                    trace_id=trace_id
                 )
                 
-                raise PipelineExecutionError(
-                    message=error_msg,
-                    pipeline_name=pipeline_name,
-                    failed_engine=engine_name,
-                    trace_id=trace_id
-                ) from e
+            except Exception as e:
+                # Retry exhausted or non-retryable error
+                logger.error(
+                    f"[{trace_id}] Engine '{engine_name}' failed after retries",
+                    extra={
+                        "trace_id": trace_id,
+                        "engine_name": engine_name,
+                        "error": str(e)
+                    },
+                    exc_info=True
+                )
+                raise from e
         
         # Pipeline completed successfully
         pipeline_end = datetime.utcnow()

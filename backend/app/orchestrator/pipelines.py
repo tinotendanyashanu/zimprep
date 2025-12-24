@@ -39,6 +39,21 @@ BLOCKED_ENGINES_DURING_REPORTING = frozenset({
 })
 
 
+# PHASE 1: Pipeline-level role requirements (RBAC)
+# Maps pipeline names to allowed roles
+# NOTE: 'admin' role can access ALL pipelines (enforced at gateway)
+PIPELINE_ROLE_REQUIREMENTS: dict[str, list[str]] = {
+    # Students take exams
+    "exam_attempt_v1": ["student"],
+    
+    # Students, parents, examiners, and admins can request appeals
+    "appeal_reconstruction_v1": ["student", "parent", "examiner", "admin"],
+    
+    # Only institutional roles can access reports
+    "reporting_v1": ["school_admin", "examiner", "admin"],
+}
+
+
 # Static pipeline definitions
 # Each pipeline is an immutable list of engine names in execution order
 PIPELINES: dict[PipelineName, list[str]] = {
@@ -58,13 +73,14 @@ PIPELINES: dict[PipelineName, list[str]] = {
         "embedding",
         "retrieval",
         "reasoning_marking",
+        "validation",  # CRITICAL: Validation must occur after reasoning and before results
         
         # Phase 5: Results & Recommendations
         "results",
         "recommendation",
         
         # Phase 6: Audit Trail
-        "audit"
+        "audit_compliance"
     ],
     
     # PHASE B2: Appeal Reconstruction Pipeline
