@@ -223,7 +223,8 @@ class Orchestrator:
         # Execute engines in order
         engine_outputs: dict[str, dict[str, Any]] = {}
         
-
+        # Preserve original client input for non-identity engines
+        original_payload = payload.copy() if isinstance(payload, dict) else payload
         
         for engine_name in engine_sequence:
             engine_start = datetime.utcnow()
@@ -245,14 +246,43 @@ class Orchestrator:
                         f"Engine '{engine_name}' not registered in orchestrator"
                     )
                 
+                # Build purpose-built input per engine
+                # Identity engine requires system-constructed input.
+                # Client input must NEVER be passed directly to identity_subscription.
+                if engine_name == "identity_subscription":
+                    # Map pipeline name to authorization action type
+                    from app.engines.identity_subscription.schemas.action_type import ActionType
+                    
+                    pipeline_to_action = {
+                        "exam_attempt_v1": ActionType.START_EXAM,
+                        "appeal_reconstruction_v1": ActionType.APPEAL,
+                        "reporting_v1": ActionType.VIEW_REPORT,
+                    }
+                    
+                    action_type = pipeline_to_action.get(
+                        pipeline_name, 
+                        ActionType.START_EXAM  # Safe default
+                    )
+                    
+                    engine_input = {
+                        "trace_id": trace_id,
+                        "requested_action": {
+                            "action_type": action_type,
+                            "metadata": {"pipeline_name": pipeline_name}
+                        }
+                    }
+                else:
+                    # Prevent accidental mutation across engines by copying dict payloads
+                    engine_input = original_payload.copy() if isinstance(original_payload, dict) else original_payload
+
                 # Execute engine (polymorphic: async or sync)
                 # This is the critical pattern that makes the orchestrator production-grade
                 if inspect.iscoroutinefunction(engine.run):
                     # Engine is async - await it
-                    result = await engine.run(payload, context)
+                    result = await engine.run(engine_input, context)
                 else:
                     # Engine is sync - call directly
-                    result = engine.run(payload, context)
+                    result = engine.run(engine_input, context)
                 
                 # Validate output contract
                 if not isinstance(result, EngineResponse):
@@ -308,8 +338,8 @@ class Orchestrator:
                         trace_id=trace_id
                     )
                 
-                # Update payload for next engine
-                payload = result.data
+                # Note: Each engine receives the original client input (except identity).
+                # Engines are independent and don't chain outputs.
                 
             except PipelineExecutionError:
                 # Re-raise pipeline errors

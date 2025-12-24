@@ -43,11 +43,12 @@ TIER_LIMITS = {
 
 # Action to limit mapping
 ACTION_LIMIT_MAP = {
-    ActionType.VIEW_EXAM: "exams_per_day",
-    ActionType.SUBMIT_ANSWER: "exams_per_day",
-    ActionType.VIEW_AI_EXPLANATION: "ai_explanations_per_week",
-    ActionType.EXPORT_ANALYTICS: "analytics_exports_per_month",
-    ActionType.START_PRACTICE_SESSION: "practice_sessions_per_day",
+    ActionType.START_EXAM: "exams_per_day",
+    ActionType.SUBMIT_EXAM: "exams_per_day",
+    ActionType.VIEW_RECOMMENDATIONS: "ai_explanations_per_week",
+    ActionType.EXPORT_REPORT_PDF: "analytics_exports_per_month",
+    ActionType.EXPORT_REPORT_CSV: "analytics_exports_per_month",
+    ActionType.START_PRACTICE: "practice_sessions_per_day",
 }
 
 

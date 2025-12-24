@@ -3,57 +3,10 @@
 Defines the contract for incoming authorization requests.
 """
 
-from enum import Enum
 from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 
-
-class ActionType(str, Enum):
-    """Types of actions that can be requested.
-    
-    Each action type maps to specific feature requirements.
-    """
-    
-    # Exam access actions
-    VIEW_EXAM = "view_exam"
-    """View an exam paper."""
-    
-    SUBMIT_ANSWER = "submit_answer"
-    """Submit an answer to an exam question."""
-    
-    VIEW_EXAM_RESULTS = "view_exam_results"
-    """View results for a completed exam."""
-    
-    # AI-powered actions
-    VIEW_AI_EXPLANATION = "view_ai_explanation"
-    """Request AI-generated explanation for a question."""
-    
-    VIEW_AI_RECOMMENDATIONS = "view_ai_recommendations"
-    """View AI-powered study recommendations."""
-    
-    # Analytics actions
-    VIEW_ANALYTICS = "view_analytics"
-    """View progress analytics and insights."""
-    
-    EXPORT_ANALYTICS = "export_analytics"
-    """Export analytics data."""
-    
-    # Practice actions
-    START_PRACTICE_SESSION = "start_practice_session"
-    """Start a practice session."""
-    
-    VIEW_PRACTICE_HISTORY = "view_practice_history"
-    """View historical practice data."""
-    
-    # Administrative actions
-    MANAGE_SUBSCRIPTION = "manage_subscription"
-    """Access subscription management."""
-    
-    VIEW_STUDENT_PROGRESS = "view_student_progress"
-    """View progress for managed students (parent/teacher)."""
-    
-    MANAGE_SCHOOL = "manage_school"
-    """Access school administration features."""
+from app.engines.identity_subscription.schemas.action_type import ActionType
 
 
 class AuthContext(BaseModel):

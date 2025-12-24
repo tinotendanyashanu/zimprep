@@ -18,26 +18,27 @@ logger = logging.getLogger(__name__)
 # Feature mapping from action types to required features
 ACTION_FEATURE_MAP = {
     # Exam access actions (free tier)
-    ActionType.VIEW_EXAM: "exam_access",
-    ActionType.SUBMIT_ANSWER: "exam_access",
+    ActionType.START_EXAM: "exam_access",
+    ActionType.SUBMIT_EXAM: "exam_access",
     ActionType.VIEW_EXAM_RESULTS: "exam_access",
-    ActionType.VIEW_PRACTICE_HISTORY: "exam_access",
     
     # Practice actions (free tier)
-    ActionType.START_PRACTICE_SESSION: "practice_mode",
+    ActionType.START_PRACTICE: "practice_mode",
+    ActionType.VIEW_RECOMMENDATIONS: "ai_recommendations",
     
-    # AI-powered actions (premium tier)
-    ActionType.VIEW_AI_EXPLANATION: "ai_explanations",
-    ActionType.VIEW_AI_RECOMMENDATIONS: "ai_recommendations",
+    # Reporting actions (premium/admin tier)
+    ActionType.VIEW_REPORT: "advanced_analytics",
+    ActionType.EXPORT_REPORT_PDF: "data_export",
+    ActionType.EXPORT_REPORT_CSV: "data_export",
     
-    # Analytics actions (premium tier)
-    ActionType.VIEW_ANALYTICS: "advanced_analytics",
-    ActionType.EXPORT_ANALYTICS: "data_export",
+    # Appeal actions
+    ActionType.APPEAL: "appeal_access",
+    ActionType.VIEW_APPEAL_HISTORY: "appeal_access",
     
     # Administrative actions
     ActionType.MANAGE_SUBSCRIPTION: None,  # Always allowed if authenticated
-    ActionType.VIEW_STUDENT_PROGRESS: "parent_dashboard",
     ActionType.MANAGE_SCHOOL: "school_admin",
+    ActionType.VIEW_AUDIT_LOG: "audit_access",
 }
 
 

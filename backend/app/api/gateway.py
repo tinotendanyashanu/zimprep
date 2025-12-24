@@ -107,7 +107,7 @@ async def execute_pipeline(
     
     try:
         # Execute pipeline via orchestrator
-        result = orchestrator.execute_pipeline(
+        result = await orchestrator.execute_pipeline(
             pipeline_name=request.pipeline_name,
             payload=request.input_data,
             context=context
