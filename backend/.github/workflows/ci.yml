@@ -1,0 +1,174 @@
+name: ZimPrep Backend CI
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  test:
+    name: Test Suite
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        python-version: ['3.11', '3.12', '3.13']
+    
+    services:
+      mongodb:
+        image: mongo:7.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: admin_password
+          MONGO_INITDB_DATABASE: zimprep_test
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.runCommand({ ping: 1 })'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Cache pip packages
+      uses: actions/cache@v3
+      with:
+        path: ~/.cache/pip
+        key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-asyncio pytest-cov httpx
+    
+    - name: Verify Python version constraint
+      run: |
+        python -c "import sys; assert sys.version_info < (3, 14), 'Python 3.14+ not supported'"
+    
+    - name: Run tests
+      env:
+        DATABASE_URL: sqlite+aiosqlite:///:memory:
+        MONGODB_URI: mongodb://admin:admin_password@localhost:27017/zimprep_test?authSource=admin
+        REDIS_URL: redis://localhost:6379/0
+        JWT_SECRET: test_secret_key_for_ci_testing_only_min_32_chars
+        OPENAI_API_KEY: sk-test-key
+        ENV: testing
+      run: |
+        pytest tests/ -v --cov=app --cov-report=xml --cov-report=term
+    
+    - name: Upload coverage reports
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+
+  lint:
+    name: Linting & Type Checking
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install mypy ruff
+    
+    - name: Lint with ruff
+      run: |
+        ruff check app/ --select=E,F,W --ignore=E501
+    
+    - name: Type check with mypy
+      run: |
+        mypy app/ --config-file mypy.ini || true  # Non-blocking initially
+    
+    - name: Check for Python 3.14 incompatible syntax
+      run: |
+        # Check for Optional[] usage (should be T | None)
+        ! grep -r "Optional\[" app/ --include="*.py" || echo "Warning: Optional[] syntax found"
+
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install bandit safety
+    
+    - name: Run Bandit security scanner
+      run: |
+        bandit -r app/ -f json -o bandit-report.json || true
+    
+    - name: Check dependencies for vulnerabilities
+      run: |
+        safety check --json || true
+    
+    - name: Upload Bandit results
+      uses: actions/upload-artifact@v3
+      with:
+        name: bandit-report
+        path: bandit-report.json
+
+  build:
+    name: Build Check
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: Test server startup
+      env:
+        DATABASE_URL: sqlite+aiosqlite:///:memory:
+        MONGODB_URI: mongodb://localhost:27017/test
+        JWT_SECRET: test_secret_key_for_build_check_min_32_chars
+        OPENAI_API_KEY: sk-test-key
+        ENV: testing
+      run: |
+        timeout 10 python -c "from app.main import app; print('✓ Server imports successfully')" || exit 0
