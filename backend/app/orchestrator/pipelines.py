@@ -14,7 +14,13 @@ from typing import Literal
 
 
 # Type-safe pipeline names
-PipelineName = Literal["exam_attempt_v1", "appeal_reconstruction_v1", "reporting_v1"]
+PipelineName = Literal[
+    "exam_attempt_v1",
+    "handwriting_exam_attempt_v1",
+    "appeal_reconstruction_v1",
+    "reporting_v1",
+    "student_dashboard_v1"
+]
 
 
 # AI engines that MUST NOT execute during appeal reconstruction
@@ -23,7 +29,8 @@ BLOCKED_ENGINES_DURING_APPEAL = frozenset({
     "embedding",
     "retrieval",
     "reasoning_marking",
-    "recommendation"
+    "recommendation",
+    "handwriting_interpretation"  # No re-interpretation during appeals
 })
 
 
@@ -35,7 +42,8 @@ BLOCKED_ENGINES_DURING_REPORTING = frozenset({
     "retrieval",
     "reasoning_marking",
     "recommendation",
-    "appeal_reconstruction"  # Appeals don't run during reporting
+    "appeal_reconstruction",  # Appeals don't run during reporting
+    "handwriting_interpretation"  # No re-interpretation during reporting
 })
 
 
@@ -51,6 +59,12 @@ PIPELINE_ROLE_REQUIREMENTS: dict[str, list[str]] = {
     
     # Only institutional roles can access reports
     "reporting_v1": ["school_admin", "examiner", "admin"],
+    
+    # Dashboard access
+    "student_dashboard_v1": ["student"],
+    
+    # Handwriting exam attempt
+    "handwriting_exam_attempt_v1": ["student"],
 }
 
 
@@ -113,8 +127,45 @@ PIPELINES: dict[PipelineName, list[str]] = {
         # Step 3: Load immutable audit snapshot and extract audit_reference
         "audit_compliance",
         
-        # Step 4: Build report (read-only), export if requested, attach audit_reference
+    # Step 4: Build report (read-only), export if requested, attach audit_reference
         "reporting"
+    ],
+
+    # DASHBOARD PIPELINE
+    # Used for fetching student dashboard data
+    "student_dashboard_v1": [
+        "identity_subscription",
+        "reporting"  # Uses reporting engine with DASHBOARD scope
+    ],
+    
+    # HANDWRITING EXAM ATTEMPT PIPELINE
+    # Used when student uploads handwritten answer photos
+    # CRITICAL: handwriting_interpretation runs AFTER submission stores raw images
+    "handwriting_exam_attempt_v1": [
+        # Phase 1: Identity & Authorization
+        "identity_subscription",
+        
+        # Phase 2: Exam Setup
+        "exam_structure",
+        "session_timing",
+        "question_delivery",
+        
+        # Phase 3: Submission & Interpretation
+        "submission",                    # Stores raw images immutably
+        "handwriting_interpretation",    # NEW: Converts images → canonical text
+        
+        # Phase 4: AI Processing
+        "embedding",                     # Embeds canonical text
+        "retrieval",
+        "reasoning_marking",
+        "validation",
+        
+        # Phase 5: Results & Recommendations
+        "results",
+        "recommendation",
+        
+        # Phase 6: Audit Trail
+        "audit_compliance"
     ]
 }
 

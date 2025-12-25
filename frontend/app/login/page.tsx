@@ -18,27 +18,28 @@ export default function LoginPage() {
     setLoading(true);
     setError("");
 
-    // Simulate network delay
-    setTimeout(() => {
-      // Mock Auth Logic
-      // In a real app, this would be an API call
-      // For Phase 1: Success rate < 5% error (KPI)
-      const success = Math.random() > 0.05; 
+    const formData = new FormData(e.target as HTMLFormElement);
+    const email = formData.get('email') as string;
+    const password = formData.get('password') as string;
 
-      if (success) {
-        localStorage.setItem("isAuthenticated", "true");
-        // Check if onboarding is done (mock)
-        const onboarding = localStorage.getItem("onboarding_completed");
-        if (onboarding) {
-          router.push("/dashboard");
-        } else {
-          router.push("/onboarding");
-        }
+    try {
+      // Import login function dynamically to avoid circular deps
+      const { login } = await import('@/lib/auth');
+      
+      // Call real backend login
+      await login(email, password);
+      
+      // Check if onboarding is done
+      const onboarding = localStorage.getItem("onboarding_completed");
+      if (onboarding) {
+        router.push("/dashboard");
       } else {
-        setError("Invalid credentials. Please try again.");
-        setLoading(false);
+        router.push("/onboarding");
       }
-    }, 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed. Please try again.");
+      setLoading(false);
+    }
   };
 
   return (
@@ -51,6 +52,7 @@ export default function LoginPage() {
           <Label htmlFor="email" className="text-zinc-600">Email address</Label>
           <Input 
             id="email" 
+            name="email"
             type="email" 
             placeholder="student@example.com" 
             required 
@@ -67,6 +69,7 @@ export default function LoginPage() {
             </div>
           <Input 
             id="password" 
+            name="password"
             type="password" 
             required 
             className="bg-zinc-50 border-zinc-200 focus:bg-white transition-all duration-300 h-11" 

@@ -24,6 +24,16 @@ def _register_engines():
     # Import and register appeal reconstruction engine
     from app.engines.appeal_reconstruction.engine import AppealReconstructionEngine
     engine_registry.register("appeal_reconstruction", AppealReconstructionEngine())
+    
+    from app.engines.reporting_analytics.engine import ReportingAnalyticsEngine
+    engine_registry.register("reporting", ReportingAnalyticsEngine())
+    
+    from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
+    engine_registry.register("identity_subscription", IdentitySubscriptionEngine())
+    
+    # AI Engines
+    from app.engines.ai.handwriting_interpretation.engine import HandwritingInterpretationEngine
+    engine_registry.register("handwriting_interpretation", HandwritingInterpretationEngine())
 
 
 # Call registration on import

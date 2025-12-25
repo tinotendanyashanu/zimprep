@@ -25,6 +25,8 @@ class ReportingScope(str, Enum):
     SUMMARY = "summary"
     DETAILED = "detailed"
     LONGITUDINAL = "longitudinal"
+    DASHBOARD = "dashboard"
+    HISTORY = "history"
 
 
 class ExportFormat(str, Enum):
@@ -60,21 +62,21 @@ class ReportingInput(BaseModel):
         description="Role of the requesting user (student, parent, school_admin)"
     )
     
-    subject_code: str = Field(
-        ...,
+    subject_code: str | None = Field(
+        default=None,
         min_length=1,
         max_length=20,
-        description="Subject code (e.g., 'MATH', 'PHYS')"
+        description="Subject code (required for non-dashboard scopes)"
     )
     
-    exam_session_id: UUID = Field(
-        ...,
-        description="ID of the exam session to report on"
+    exam_session_id: UUID | None = Field(
+        default=None,
+        description="ID of the exam session to report on (required for non-dashboard scopes)"
     )
     
     reporting_scope: ReportingScope = Field(
         ...,
-        description="Level of detail requested (summary, detailed, longitudinal)"
+        description="Level of detail requested (summary, detailed, longitudinal, dashboard)"
     )
     
     export_format: ExportFormat = Field(

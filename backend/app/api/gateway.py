@@ -16,7 +16,6 @@ from typing import Annotated
 import logging
 
 from app.api.dependencies import get_current_user, User
-from app.api.dependencies.rate_limit import RateLimitedUser
 from app.api.schemas import (
     PipelineExecutionRequest,
     PipelineExecutionResponse,
@@ -45,7 +44,7 @@ router = APIRouter(prefix="/api/v1", tags=["gateway"])
 )
 async def execute_pipeline(
     request: PipelineExecutionRequest,
-    current_user: RateLimitedUser  # Rate limiting applied automatically
+    current_user: Annotated[User, Depends(get_current_user)]
 ) -> PipelineExecutionResponse:
     """Execute a pipeline with full authentication and validation.
     

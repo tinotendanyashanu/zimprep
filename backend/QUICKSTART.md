@@ -8,9 +8,8 @@ PHASE 1-6 Implementation.
 ## Prerequisites
 
 ```bash
-# Python 3.11, 3.12, or 3.13 (NOT 3.14 - SQLAlchemy compatibility issues)
+# Python 3.11+
 python --version
-# Expected output: Python 3.11.x, 3.12.x, or 3.13.x
 
 # MongoDB running locally or accessible
 # Redis running (for distributed rate limiting in production)

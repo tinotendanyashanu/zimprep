@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import { ExamPaper, Question } from './types';
+import { executePipeline } from '../api-client';
+import { getUser } from '../auth';
 
 interface ExamState {
   paper: ExamPaper | null;
@@ -7,6 +9,9 @@ interface ExamState {
   answers: Record<string, string>; // questionId -> answer
   timeLeft: number; // in seconds
   status: 'idle' | 'running' | 'paused' | 'submitted';
+  isSubmitting: boolean;
+  submitError: string | null;
+  traceId: string | null;
   
   // Actions
   initializeExam: (paper: ExamPaper) => void;
@@ -15,7 +20,7 @@ interface ExamState {
   prevQuestion: () => void;
   jumpToQuestion: (index: number) => void;
   tickTimer: () => void;
-  submitExam: () => void;
+  submitExam: () => Promise<void>;
 }
 
 export const useExamStore = create<ExamState>((set, get) => ({
@@ -24,6 +29,9 @@ export const useExamStore = create<ExamState>((set, get) => ({
   answers: {},
   timeLeft: 0,
   status: 'idle',
+  isSubmitting: false,
+  submitError: null,
+  traceId: null,
 
   initializeExam: (paper) => set({
     paper,
@@ -31,6 +39,8 @@ export const useExamStore = create<ExamState>((set, get) => ({
     answers: {},
     timeLeft: paper.durationMinutes * 60,
     status: 'running',
+    submitError: null,
+    traceId: null,
   }),
 
   setAnswer: (questionId, answer) => set((state) => ({
@@ -63,57 +73,65 @@ export const useExamStore = create<ExamState>((set, get) => ({
     if (state.status !== 'running') return state;
     const newTime = state.timeLeft - 1;
     if (newTime <= 0) {
-      return { timeLeft: 0, status: 'submitted' }; // Auto-submit? Or just pause? Let's say submitted for now or handled by UI
+      // Auto-submit when time runs out
+      get().submitExam();
+      return { timeLeft: 0 };
     }
     return { timeLeft: newTime };
   }),
 
   submitExam: async () => {
     const state = get();
+    const user = getUser();
     
-    // Immediate UI feedback - set status to submitting
-    set({ status: 'submitted' }); // Will show "submitted" screen immediately
-    
-    try {
-      // Call real backend pipeline
-      const response = await fetch('/api/v1/pipeline/execute', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // TODO: Add authorization header when auth is implemented
-          // 'Authorization': `Bearer ${getAuthToken()}`
-        },
-        body: JSON.stringify({
-          pipeline_name: 'exam_attempt_v1',
-          input_data: {
-            student_id: 'temp_student_id', // TODO: Get from auth context
-            exam_id: state.paper?.id || 'unknown',
-            subject_code: state.paper?.subject || 'unknown',
-            paper_code: state.paper?.code || 'unknown',
-            answers: Object.entries(state.answers).map(([questionId, answer]) => ({
-              question_id: questionId,
-              student_answer: answer,
-              submitted_at: new Date().toISOString(),
-            })),
-            submitted_at: new Date().toISOString(),
-          }
-        })
+    if (!user) {
+      set({ 
+        submitError: 'Not authenticated. Please login first.',
+        isSubmitting: false 
       });
-      
-      if (!response.ok) {
-        console.error('Pipeline execution failed:', response.statusText);
-        // Keep status as submitted - don't rollback to avoid confusing user
-        // TODO: Could show error notification to user
-      } else {
-        const result = await response.json();
-        console.log('✓ Pipeline executed successfully:', result.trace_id);
-        // Store trace_id for reference in results page
-        // TODO: Navigate to results page with trace_id
+      return;
+    }
+
+    // Set submitting state
+    set({ 
+      isSubmitting: true, 
+      submitError: null,
+      status: 'submitted' // Show submitted UI immediately
+    });
+
+    try {
+      // Call backend pipeline
+      const result = await executePipeline('exam_attempt_v1', {
+        user_id: user.id,
+        exam_id: state.paper?.id || 'unknown',
+        subject_code: state.paper?.subject || 'unknown',
+        answers: Object.entries(state.answers).map(([questionId, answer]) => ({
+          question_id: questionId,
+          student_answer: answer,
+          submitted_at: new Date().toISOString(),
+        })),
+        submitted_at: new Date().toISOString(),
+      });
+
+      console.log('✅ Exam submitted successfully:', result.trace_id);
+
+      set({ 
+        isSubmitting: false,
+        traceId: result.trace_id,
+      });
+
+      // Navigate to results page with trace_id
+      if (typeof window !== 'undefined') {
+        window.location.href = `/results/${result.trace_id}`;
       }
     } catch (error) {
-      console.error('Error submitting exam:', error);
-      // Keep status as submitted - backend has received the data
-      // TODO: Could show error notification to user
+      console.error('❌ Exam submission failed:', error);
+      
+      set({ 
+        submitError: error instanceof Error ? error.message : 'Submission failed',
+        isSubmitting: false,
+        // Keep status as submitted - don't confuse user by resetting
+      });
     }
   },
 }));

@@ -22,6 +22,9 @@ from app.engines.reporting_analytics.schemas.output import (
     ReportType,
     VisualSection,
 )
+from pymongo import MongoClient
+from app.config.settings import settings
+from app.engines.results.repository.results_repo import ResultsRepository
 from app.engines.reporting_analytics.rules.visibility_rules import VisibilityEnforcer
 from app.engines.reporting_analytics.rules.aggregation_rules import AggregationRules
 from app.engines.reporting_analytics.services.report_builder import ReportBuilderService
@@ -77,6 +80,15 @@ class ReportingAnalyticsEngine:
     def __init__(self):
         """Initialize the Reporting & Analytics Engine."""
         self.logger = logger
+        
+        # Initialize repository connection
+        try:
+            self.mongo_client = MongoClient(settings.MONGODB_URI)
+            self.results_repo = ResultsRepository(self.mongo_client)
+            self.logger.info("Connected to ResultsRepository")
+        except Exception as e:
+            self.logger.warning(f"Failed to connect to ResultsRepository: {e}")
+            self.results_repo = None
     
     async def execute(
         self,
@@ -237,9 +249,37 @@ class ReportingAnalyticsEngine:
         Raises:
             ResultsNotFoundError: If results cannot be found
         """
+        if input_data.reporting_scope in [ReportingScope.DASHBOARD, ReportingScope.HISTORY]:
+            # For Dashboard/History, we fetch ALL results for the user
+            if not self.results_repo:
+                raise ResultsNotFoundError(
+                    message="Results repository not available",
+                    trace_id=input_data.trace_id,
+                    context={}
+                )
+            
+            # Fetch recent results
+            recent_results = self.results_repo.find_by_candidate(
+                candidate_id=str(input_data.user_id)
+            )
+            
+            # Convert ObjectIds to strings if necessary
+            for r in recent_results:
+                if "_id" in r:
+                    r["_id"] = str(r["_id"])
+            
+            return {"dashboard_results": recent_results}
+
         if results_data is None:
-            # In production, load from Results repository
-            # For now, raise error
+            # In production, check repository if not provided by orchestrator
+            if self.results_repo and input_data.exam_session_id:
+                # Try to find by trace_id first (if exam_session_id was trace_id) 
+                # or we need to look up by candidate + exam + subject
+                # For simplicity, if we have exam_session_id, assume strict lookup might be needed,
+                # but currently pipelines pass results_data explicitly.
+                pass
+
+            # Raise error if still not found
             raise ResultsNotFoundError(
                 message=f"Results not found for exam session {input_data.exam_session_id}",
                 trace_id=input_data.trace_id,
@@ -285,6 +325,49 @@ class ReportingAnalyticsEngine:
             ReportGenerationError: If assembly fails
         """
         builder = ReportBuilderService(trace_id=input_data.trace_id)
+        
+        if input_data.reporting_scope in [ReportingScope.DASHBOARD, ReportingScope.HISTORY]:
+            # Custom dashboard/history payload
+            dashboard_results = results.get("dashboard_results", [])
+            
+            # Transform for frontend consumption
+            recent_exams = []
+            for res in dashboard_results:
+                recent_exams.append({
+                    "exam_id": res.get("exam_id"),
+                    "exam_name": f"{res.get('subject_name')} - {res.get('paper_code', 'Paper 1')}",
+                    "date": res.get("issued_at", datetime.now()).isoformat(),
+                    "grade": res.get("grade"),
+                    "marks": res.get("total_marks"),
+                    "max_marks": res.get("max_total_marks"),
+                    "trace_id": res.get("trace_id"),
+                    "can_appeal": True
+                })
+
+            if input_data.reporting_scope == ReportingScope.HISTORY:
+                return {
+                    "history": recent_exams  # Return all, no truncation
+                }
+
+            return {
+                "dashboard": {
+                    "recent_exams": recent_exams[:5], # Top 5
+                    "upcoming_exams": [],
+                    "performance": {
+                        "average_grade": "B", # Mock
+                        "improvement_trend": "stable",
+                        "strengths": ["Mathematics"],
+                        "weaknesses": ["Physics"]
+                    },
+                    "recommendations": [
+                         {
+                            "topic": "Algebra",
+                            "reason": "Score below 60% in last attempt",
+                            "resources": ["Chapter 5"]
+                         }
+                    ]
+                }
+            }
         
         if input_data.role == UserRole.STUDENT:
             report = builder.build_student_report(results, historical_data)
