@@ -30,6 +30,10 @@ from app.orchestrator.orchestrator import (
 from app.orchestrator.execution_context import ExecutionContext
 from app.engines.appeal_reconstruction.schemas.output import AppealReconstructionOutput
 
+# New engines endpoint routers (Phase 4)
+from app.api.endpoints.handwriting_endpoints import router as handwriting_router
+from app.api.endpoints.practice_endpoints import router as practice_router
+
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["gateway"])

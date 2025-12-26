@@ -45,38 +45,43 @@ class RecommendationEngineAdapter:
         Initialize recommendation engine adapter.
         
         Args:
-            llm_client: LLM client (if None, will be created from env)
+            llm_client: LLM client (if None, will be created on first run())
             model_name: Model name (if None, will use env default)
             min_confidence_threshold: Confidence threshold (if None, will use env default)
         """
         
-        # Get configuration from environment or use defaults
-        model_name = model_name or os.getenv("RECOMMENDATION_MODEL", "gpt-4")
-        min_confidence_threshold = float(
+        # Store configuration
+        self.llm_client = llm_client
+        self.model_name = model_name or os.getenv("RECOMMENDATION_MODEL", "gpt-4")
+        self.min_confidence_threshold = float(
             min_confidence_threshold or os.getenv("RECOMMENDATION_MIN_CONFIDENCE", "0.6")
         )
-        temperature = float(os.getenv("RECOMMENDATION_TEMPERATURE", "0.3"))
-        max_tokens = int(os.getenv("RECOMMENDATION_MAX_TOKENS", "2000"))
-        timeout = int(os.getenv("RECOMMENDATION_TIMEOUT", "30"))
+        self.temperature = float(os.getenv("RECOMMENDATION_TEMPERATURE", "0.3"))
+        self.max_tokens = int(os.getenv("RECOMMENDATION_MAX_TOKENS", "2000"))
+        self.timeout = int(os.getenv("RECOMMENDATION_TIMEOUT", "30"))
         
-        # Create LLM client if not provided
-        if llm_client is None:
-            llm_client = self._create_llm_client()
-        
-        # Initialize core engine
-        self.core_engine = CoreRecommendationEngine(
-            llm_client=llm_client,
-            model_name=model_name,
-            temperature=temperature,
-            min_confidence_threshold=min_confidence_threshold,
-            max_tokens=max_tokens,
-            timeout_seconds=timeout,
-        )
+        # Lazy initialization - core engine created on first run()
+        self.core_engine = None
         
         logger.info(
             f"Recommendation Engine Adapter initialized "
-            f"(model: {model_name}, confidence_threshold: {min_confidence_threshold})"
+            f"(model: {self.model_name}, confidence_threshold: {self.min_confidence_threshold})"
         )
+    
+    def _ensure_engine(self) -> None:
+        """Ensure core engine is initialized (lazy initialization)."""
+        if self.core_engine is None:
+            if self.llm_client is None:
+                self.llm_client = self._create_llm_client()
+            
+            self.core_engine = CoreRecommendationEngine(
+                llm_client=self.llm_client,
+                model_name=self.model_name,
+                temperature=self.temperature,
+                min_confidence_threshold=self.min_confidence_threshold,
+                max_tokens=self.max_tokens,
+                timeout_seconds=self.timeout,
+            )
     
     def _create_llm_client(self) -> Any:
         """
@@ -130,6 +135,9 @@ class RecommendationEngineAdapter:
         Returns:
             EngineResponse with RecommendationOutput
         """
+        
+        # Ensure core engine is initialized (lazy initialization)
+        self._ensure_engine()
         
         trace_id = context.trace_id
         start_time = datetime.utcnow()

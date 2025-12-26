@@ -30,7 +30,10 @@ BLOCKED_ENGINES_DURING_APPEAL = frozenset({
     "retrieval",
     "reasoning_marking",
     "recommendation",
-    "handwriting_interpretation"  # No re-interpretation during appeals
+    "handwriting_interpretation",  # No re-interpretation during appeals
+    "validation",                  # No validation changes
+    "topic_intelligence",          # No topic changes in appeals
+    "practice_assembly"            # No practice creation in appeals
 })
 
 
@@ -42,8 +45,11 @@ BLOCKED_ENGINES_DURING_REPORTING = frozenset({
     "retrieval",
     "reasoning_marking",
     "recommendation",
-    "appeal_reconstruction",  # Appeals don't run during reporting
-    "handwriting_interpretation"  # No re-interpretation during reporting
+    "appeal_reconstruction",       # Appeals don't run during reporting
+    "handwriting_interpretation",  # No re-interpretation during reporting
+    "validation",                  # No validation changes
+    "topic_intelligence",          # No topic changes in reporting
+    "practice_assembly"            # No practice creation in reporting
 })
 
 
@@ -71,29 +77,52 @@ PIPELINE_ROLE_REQUIREMENTS: dict[str, list[str]] = {
 # Static pipeline definitions
 # Each pipeline is an immutable list of engine names in execution order
 PIPELINES: dict[PipelineName, list[str]] = {
+    # Standard exam pipeline
     "exam_attempt_v1": [
-        # Phase 1: Identity & Authorization
-        "identity_subscription",
-        
-        # Phase 2: Exam Setup
+        "identity",
         "exam_structure",
         "session_timing",
         "question_delivery",
-        
-        # Phase 3: Submission
         "submission",
-        
-        # Phase 4: AI Processing
         "embedding",
         "retrieval",
         "reasoning_marking",
-        "validation",  # CRITICAL: Validation must occur after reasoning and before results
-        
-        # Phase 5: Results & Recommendations
+        "validation",
         "results",
         "recommendation",
-        
-        # Phase 6: Audit Trail
+        "audit_compliance"
+    ],
+    
+    # Handwriting-based exam pipeline (NEW)
+    "handwriting_exam_attempt_v1": [
+        "identity",
+        "exam_structure",
+        "session_timing",
+        "question_delivery",
+        "submission",
+        "handwriting_interpretation",  # NEW: OCR handwritten answers
+        "embedding",
+        "retrieval",
+        "reasoning_marking",
+        "validation",
+        "results",
+        "recommendation",
+        "audit_compliance"
+    ],
+    
+    # Topic practice pipeline (NEW)
+    "topic_practice_v1": [
+        "identity",
+        "topic_intelligence",      # NEW: Find related topics
+        "practice_assembly",       # NEW: Create practice session
+        "question_delivery",
+        "submission",
+        "embedding",
+        "retrieval",
+        "reasoning_marking",
+        "validation",
+        "results",
+        "recommendation",
         "audit_compliance"
     ],
     
@@ -136,36 +165,6 @@ PIPELINES: dict[PipelineName, list[str]] = {
     "student_dashboard_v1": [
         "identity_subscription",
         "reporting"  # Uses reporting engine with DASHBOARD scope
-    ],
-    
-    # HANDWRITING EXAM ATTEMPT PIPELINE
-    # Used when student uploads handwritten answer photos
-    # CRITICAL: handwriting_interpretation runs AFTER submission stores raw images
-    "handwriting_exam_attempt_v1": [
-        # Phase 1: Identity & Authorization
-        "identity_subscription",
-        
-        # Phase 2: Exam Setup
-        "exam_structure",
-        "session_timing",
-        "question_delivery",
-        
-        # Phase 3: Submission & Interpretation
-        "submission",                    # Stores raw images immutably
-        "handwriting_interpretation",    # NEW: Converts images → canonical text
-        
-        # Phase 4: AI Processing
-        "embedding",                     # Embeds canonical text
-        "retrieval",
-        "reasoning_marking",
-        "validation",
-        
-        # Phase 5: Results & Recommendations
-        "results",
-        "recommendation",
-        
-        # Phase 6: Audit Trail
-        "audit_compliance"
     ]
 }
 

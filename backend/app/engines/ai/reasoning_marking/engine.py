@@ -55,9 +55,17 @@ class ReasoningMarkingEngine:
     """
     
     def __init__(self):
-        """Initialize engine."""
-        self.reasoning_service = ReasoningService()
+        """Initialize engine (lazy initialization for AI service)."""
+        self.reasoning_service = None  # Lazy init - created on first run()
         logger.info(f"Engine initialized: {ENGINE_NAME} v{ENGINE_VERSION}")
+    
+    def _ensure_service(self):
+        """Ensure reasoning service is initialized (lazy initialization).
+        
+        This defers OPENAI_API_KEY validation until the engine is actually used.
+        """
+        if self.reasoning_service is None:
+            self.reasoning_service = ReasoningService()
     
     async def run(
         self,
@@ -109,6 +117,9 @@ class ReasoningMarkingEngine:
                 input_data.retrieved_evidence,
                 trace_id
             )
+            
+            # PHASE ZERO: Ensure service is initialized (lazy init)
+            self._ensure_service()
             
             # STEP 2: Rubric Decomposition (NON-AI)
             rubric_map = RubricMapperService.decompose_rubric(

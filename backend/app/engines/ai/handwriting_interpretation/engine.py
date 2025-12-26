@@ -65,10 +65,20 @@ class HandwritingInterpretationEngine:
     """
     
     def __init__(self):
-        """Initialize engine with services."""
-        self.ocr_service = OCRService()
-        self.math_recognizer = MathRecognizer()
-        self.structure_extractor = StructureExtractor()
+        """Initialize engine (lazy initialization for AI services)."""
+        self.ocr_service = None  # Lazy init - created on first run()
+        self.math_recognizer = None  # Lazy init
+        self.structure_extractor = None  # Lazy init
+    
+    def _ensure_services(self):
+        """Ensure services are initialized (lazy initialization).
+        
+        This defers OPENAI_API_KEY validation until the engine is actually used.
+        """
+        if self.ocr_service is None:
+            self.ocr_service = OCRService()
+            self.math_recognizer = MathRecognizer()
+            self.structure_extractor = StructureExtractor()
     
     async def run(
         self,
@@ -111,6 +121,9 @@ class HandwritingInterpretationEngine:
             
             # Step 3: Pre-process image (validate size, format)
             self._validate_image(image_data, trace_id)
+            
+            # PHASE ZERO: Ensure services are initialized (lazy init)
+            self._ensure_services()
             
             # Step 4: Execute OCR
             logger.info(f"[{trace_id}] Executing OCR...")
