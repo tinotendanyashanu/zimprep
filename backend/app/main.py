@@ -39,6 +39,7 @@ from app.orchestrator.orchestrator import (
 from app.api.gateway import router as gateway_router
 from app.api.endpoints.handwriting_endpoints import router as handwriting_router
 from app.api.endpoints.practice_endpoints import router as practice_router
+from app.api.endpoints.external_api import router as external_router  # Phase 5
 
 
 # Configure logging
@@ -304,6 +305,7 @@ async def health_check():
 app.include_router(gateway_router)
 app.include_router(handwriting_router)
 app.include_router(practice_router)
+app.include_router(external_router)  # Phase 5: External API endpoints
 
 
 # Root endpoint

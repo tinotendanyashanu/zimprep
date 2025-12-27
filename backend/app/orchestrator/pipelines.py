@@ -22,7 +22,10 @@ PipelineName = Literal[
     "student_dashboard_v1",
     "learning_analytics_v1",  # PHASE THREE: Learning analytics pipeline
     "institutional_analytics_v1",  # PHASE FOUR: Institutional analytics
-    "governance_reporting_v1"  # PHASE FOUR: Governance reporting
+    "governance_reporting_v1",  # PHASE FOUR: Governance reporting
+    "external_results_v1",  # PHASE FIVE: External results API
+    "external_analytics_v1",  # PHASE FIVE: External analytics API
+    "external_governance_v1"  # PHASE FIVE: External governance API
 ]
 
 
@@ -83,6 +86,11 @@ PIPELINE_ROLE_REQUIREMENTS: dict[str, list[str]] = {
     
     # PHASE FOUR: Governance reporting access
     "governance_reporting_v1": ["regulator", "board_member", "admin"],
+    
+    # PHASE FIVE: External API access (external_partner role)
+    "external_results_v1": ["external_partner"],
+    "external_analytics_v1": ["external_partner"],
+    "external_governance_v1": ["external_partner"],
 }
 
 
@@ -230,6 +238,51 @@ PIPELINES: dict[PipelineName, list[str]] = {
         "governance_reporting",
         
         # Step 3: Log report generation in audit trail
+        "audit_compliance"
+    ],
+    
+    # PHASE FIVE: EXTERNAL RESULTS API PIPELINE
+    # Provides read-only access to aggregated student results for external partners
+    # CRITICAL: API key authentication, scope enforcement, rate limiting, and privacy redaction
+    "external_results_v1": [
+        # Step 1: Validate API key, scope, and rate limits
+        "external_access_control",
+        
+        # Step 2: Load results (READ-ONLY, redacted)
+        "results",
+        
+        # Step 3: Log external access
+        "audit_compliance"
+    ],
+    
+    # PHASE FIVE: EXTERNAL ANALYTICS API PIPELINE
+    # Provides read-only access to learning analytics for external partners
+    # CRITICAL: Privacy-safe aggregated data only, no individual student details
+    "external_analytics_v1": [
+        # Step 1: Validate API key, scope, and rate limits
+        "external_access_control",
+        
+        # Step 2: Load learning analytics (READ-ONLY, aggregated)
+        "learning_analytics",
+        
+        # Step 3: Load mastery modeling (READ-ONLY)
+        "mastery_modeling",
+        
+        # Step 4: Log external access
+        "audit_compliance"
+    ],
+    
+    # PHASE FIVE: EXTERNAL GOVERNANCE API PIPELINE
+    # Provides read-only access to governance reports for external partners
+    # CRITICAL: Compliance metrics only, no student identifiers
+    "external_governance_v1": [
+        # Step 1: Validate API key, scope, and rate limits
+        "external_access_control",
+        
+        # Step 2: Generate governance report (READ-ONLY)
+        "governance_reporting",
+        
+        # Step 3: Log external access
         "audit_compliance"
     ]
 }

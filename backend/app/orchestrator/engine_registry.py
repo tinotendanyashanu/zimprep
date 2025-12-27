@@ -202,6 +202,14 @@ def _register_engines():
     engine_registry.register("governance_reporting", GovernanceReportingEngine())
     
     # =============================================================================
+    # PHASE FIVE: EXTERNAL ACCESS CONTROL (1 engine)
+    # =============================================================================
+    
+    # External API Engine: External Access Control
+    from app.engines.external_access_control.engine import ExternalAccessControlEngine
+    engine_registry.register("external_access_control", ExternalAccessControlEngine())
+    
+    # =============================================================================
     # REGISTRATION COMPLETE
     # =============================================================================
     
