@@ -4,9 +4,12 @@ Defines the aggregated payload contract from the Orchestrator.
 This payload contains complete execution context for forensic logging.
 """
 
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, TYPE_CHECKING
 from datetime import datetime
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from app.engines.audit_compliance.schemas.cost_metadata import AICostMetadata
 
 
 class EngineExecutionRecord(BaseModel):
@@ -277,6 +280,12 @@ class AuditComplianceInput(BaseModel):
     request_metadata: Dict[str, Any] = Field(
         default_factory=dict,
         description="Additional request context (e.g., IP, user agent - logged only)"
+    )
+    
+    # PHASE TWO: AI cost metadata for financial observability
+    ai_cost_metadata: List["AICostMetadata"] = Field(
+        default_factory=list,
+        description="AI cost metadata for all AI calls made during this execution (Phase Two)"
     )
     
     class Config:

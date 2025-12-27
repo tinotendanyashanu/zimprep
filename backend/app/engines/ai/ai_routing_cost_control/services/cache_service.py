@@ -194,41 +194,110 @@ class CacheService:
         pass
     
     async def _lookup_redis(self, cache_key: str) -> dict[str, Any] | None:
-        """Look up value in Redis (not implemented - placeholder)."""
-        # Placeholder: In production, implement Redis lookup
-        # import redis.asyncio as redis
-        # value = await self.redis_client.get(f"ai_cache:{cache_key}")
-        # if value:
-        #     return json.loads(value)
-        return None
+        """Look up value in Redis.
+        
+        Args:
+            cache_key: Cache key to look up
+            
+        Returns:
+            Cached value dict or None if not found
+        """
+        if not self.redis_client:
+            return None
+        
+        try:
+            import json
+            value = await self.redis_client.get(f"ai_cache:{cache_key}")
+            if value:
+                return json.loads(value)
+            return None
+        except Exception as e:
+            logger.warning(f"Redis lookup failed: {e}")
+            return None
     
     async def _store_redis(self, cache_key: str, value: dict[str, Any]):
-        """Store value in Redis (not implemented - placeholder)."""
-        # Placeholder: In production, implement Redis storage
-        # import json
-        # await self.redis_client.setex(
-        #     f"ai_cache:{cache_key}",
-        #     self.REDIS_TTL_SECONDS,
-        #     json.dumps(value)
-        # )
-        pass
+        """Store value in Redis with TTL.
+        
+        Args:
+            cache_key: Cache key
+            value: Value to store
+        """
+        if not self.redis_client:
+            return
+        
+        try:
+            import json
+            await self.redis_client.setex(
+                f"ai_cache:{cache_key}",
+                self.REDIS_TTL_SECONDS,
+                json.dumps(value)
+            )
+        except Exception as e:
+            logger.error(f"Redis storage failed: {e}")
     
     async def _lookup_mongodb(self, cache_key: str) -> dict[str, Any] | None:
-        """Look up value in MongoDB (not implemented - placeholder)."""
-        # Placeholder: In production, implement MongoDB lookup
-        # collection = self.mongodb_client.ai_routing_cache
-        # doc = await collection.find_one({"cache_key": cache_key})
-        # if doc:
-        #     return doc.get("cached_value")
-        return None
+        """Look up value in MongoDB.
+        
+        Args:
+            cache_key: Cache key to look up
+            
+        Returns:
+            Cached value dict or None if not found
+        """
+        if not self.mongodb_client:
+            return None
+        
+        try:
+            # Access ai_reasoning_cache collection
+            db = self.mongodb_client.zimprep
+            collection = db.ai_reasoning_cache
+            
+            # Find document by cache_key
+            doc = await collection.find_one({"cache_key": cache_key})
+            
+            if doc:
+                # Increment hit count
+                await collection.update_one(
+                    {"cache_key": cache_key},
+                    {"$inc": {"hit_count": 1}}
+                )
+                
+                return doc.get("cached_value")
+            
+            return None
+        except Exception as e:
+            logger.error(f"MongoDB lookup failed: {e}")
+            return None
     
     async def _store_mongodb(self, cache_key: str, value: dict[str, Any]):
-        """Store value in MongoDB (not implemented - placeholder)."""
-        # Placeholder: In production, implement MongoDB storage
-        # collection = self.mongodb_client.ai_routing_cache
-        # await collection.update_one(
-        #     {"cache_key": cache_key},
-        #     {"$set": {"cached_value": value, "updated_at": datetime.utcnow()}},
-        #     upsert=True
-        # )
-        pass
+        """Store value in MongoDB (persistent cache).
+        
+        Args:
+            cache_key: Cache key
+            value: Value to store
+        """
+        if not self.mongodb_client:
+            return
+        
+        try:
+            # Access ai_reasoning_cache collection
+            db = self.mongodb_client.zimprep
+            collection = db.ai_reasoning_cache
+            
+            # Upsert document
+            await collection.update_one(
+                {"cache_key": cache_key},
+                {
+                    "$set": {
+                        "cached_value": value,
+                        "updated_at": datetime.utcnow()
+                    },
+                    "$setOnInsert": {
+                        "cached_at": datetime.utcnow(),
+                        "hit_count": 0
+                    }
+                },
+                upsert=True
+            )
+        except Exception as e:
+            logger.error(f"MongoDB storage failed: {e}")

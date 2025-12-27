@@ -43,19 +43,35 @@ class CostTracker:
         if not self.tracking_enabled:
             return 0.0
         
-        # Placeholder: In production, query MongoDB
-        # collection = self.mongodb_client.ai_cost_tracking
-        # today = datetime.utcnow().date()
-        # result = await collection.aggregate([
-        #     {"$match": {
-        #         "user_id": user_id,
-        #         "timestamp": {"$gte": datetime.combine(today, datetime.min.time())}
-        #     }},
-        #     {"$group": {"_id": None, "total": {"$sum": "$cost_usd"}}}
-        # ]).to_list(1)
-        # return result[0]["total"] if result else 0.0
-        
-        return 0.0  # Placeholder
+        try:
+            # Access ai_cost_tracking collection
+            db = self.mongodb_client.zimprep
+            collection = db.ai_cost_tracking
+            
+            # Get today's date range
+            today = datetime.utcnow().date()
+            today_start = datetime.combine(today, datetime.min.time())
+            
+            # Aggregate costs for today
+            result = await collection.aggregate([
+                {
+                    "$match": {
+                        "user_id": user_id,
+                        "timestamp": {"$gte": today_start}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total": {"$sum": "$cost_usd"}
+                    }
+                }
+            ]).to_list(1)
+            
+            return result[0]["total"] if result else 0.0
+        except Exception as e:
+            logger.error(f"Failed to get user cost today: {e}")
+            return 0.0
     
     async def get_user_cost_month(self, user_id: str) -> float:
         """Get user's cumulative cost this month in USD.
@@ -69,8 +85,35 @@ class CostTracker:
         if not self.tracking_enabled:
             return 0.0
         
-        # Placeholder: Similar to get_user_cost_today but for current month
-        return 0.0
+        try:
+            # Access ai_cost_tracking collection
+            db = self.mongodb_client.zimprep
+            collection = db.ai_cost_tracking
+            
+            # Get current month range
+            now = datetime.utcnow()
+            month_start = datetime(now.year, now.month, 1)
+            
+            # Aggregate costs for current month
+            result = await collection.aggregate([
+                {
+                    "$match": {
+                        "user_id": user_id,
+                        "timestamp": {"$gte": month_start}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total": {"$sum": "$cost_usd"}
+                    }
+                }
+            ]).to_list(1)
+            
+            return result[0]["total"] if result else 0.0
+        except Exception as e:
+            logger.error(f"Failed to get user cost month: {e}")
+            return 0.0
     
     async def get_school_cost_month(self, school_id: str) -> float:
         """Get school's cumulative cost this month in USD.
@@ -84,8 +127,35 @@ class CostTracker:
         if not self.tracking_enabled:
             return 0.0
         
-        # Placeholder: Similar aggregation for school
-        return 0.0
+        try:
+            # Access ai_cost_tracking collection
+            db = self.mongodb_client.zimprep
+            collection = db.ai_cost_tracking
+            
+            # Get current month range
+            now = datetime.utcnow()
+            month_start = datetime(now.year, now.month, 1)
+            
+            # Aggregate costs for current month
+            result = await collection.aggregate([
+                {
+                    "$match": {
+                        "school_id": school_id,
+                        "timestamp": {"$gte": month_start}
+                    }
+                },
+                {
+                    "$group": {
+                        "_id": None,
+                        "total": {"$sum": "$cost_usd"}
+                    }
+                }
+            ]).to_list(1)
+            
+            return result[0]["total"] if result else 0.0
+        except Exception as e:
+            logger.error(f"Failed to get school cost month: {e}")
+            return 0.0
     
     async def record_usage(
         self,
@@ -125,9 +195,13 @@ class CostTracker:
             f"model={model}, cost=${cost_usd:.4f}"
         )
         
-        # Placeholder: In production, insert into MongoDB
-        # collection = self.mongodb_client.ai_cost_tracking
-        # await collection.insert_one(usage_record)
+        # Insert into MongoDB
+        try:
+            db = self.mongodb_client.zimprep
+            collection = db.ai_cost_tracking
+            await collection.insert_one(usage_record)
+        except Exception as e:
+            logger.error(f"[{trace_id}] Failed to record usage: {e}")
     
     async def check_limits(
         self,

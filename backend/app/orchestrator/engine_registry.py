@@ -178,6 +178,30 @@ def _register_engines():
     engine_registry.register("appeal_reconstruction", AppealReconstructionEngine())
     
     # =============================================================================
+    # PHASE THREE: LEARNING ANALYTICS ENGINES (2 engines)
+    # =============================================================================
+    
+    # Analytics Engine 1: Learning Analytics
+    from app.engines.learning_analytics.engine import LearningAnalyticsEngine
+    engine_registry.register("learning_analytics", LearningAnalyticsEngine())
+    
+    # Analytics Engine 2: Mastery Modeling
+    from app.engines.mastery_modeling.engine import MasteryModelingEngine
+    engine_registry.register("mastery_modeling", MasteryModelingEngine())
+    
+    # =============================================================================
+    # PHASE FOUR: INSTITUTIONAL & GOVERNANCE ANALYTICS (2 engines)
+    # =============================================================================
+    
+    # Analytics Engine 3: Institutional Analytics
+    from app.engines.institutional_analytics.engine import InstitutionalAnalyticsEngine
+    engine_registry.register("institutional_analytics", InstitutionalAnalyticsEngine())
+    
+    # Analytics Engine 4: Governance Reporting
+    from app.engines.governance_reporting.engine import GovernanceReportingEngine
+    engine_registry.register("governance_reporting", GovernanceReportingEngine())
+    
+    # =============================================================================
     # REGISTRATION COMPLETE
     # =============================================================================
     

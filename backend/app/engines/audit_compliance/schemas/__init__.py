@@ -11,6 +11,7 @@ from .output import AuditComplianceOutput
 from .audit_record import AuditRecord
 from .ai_evidence import AIEvidence, ModelInvocation
 from .compliance_snapshot import ComplianceSnapshot
+from .cost_metadata import AICostMetadata  # PHASE TWO
 
 __all__ = [
     "AuditComplianceInput",
@@ -23,4 +24,5 @@ __all__ = [
     "AIEvidenceReference",
     "ValidationDecision",
     "PolicyMetadata",
+    "AICostMetadata",  # PHASE TWO
 ]

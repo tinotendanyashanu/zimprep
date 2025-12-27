@@ -19,7 +19,10 @@ PipelineName = Literal[
     "handwriting_exam_attempt_v1",
     "appeal_reconstruction_v1",
     "reporting_v1",
-    "student_dashboard_v1"
+    "student_dashboard_v1",
+    "learning_analytics_v1",  # PHASE THREE: Learning analytics pipeline
+    "institutional_analytics_v1",  # PHASE FOUR: Institutional analytics
+    "governance_reporting_v1"  # PHASE FOUR: Governance reporting
 ]
 
 
@@ -69,8 +72,17 @@ PIPELINE_ROLE_REQUIREMENTS: dict[str, list[str]] = {
     # Dashboard access
     "student_dashboard_v1": ["student"],
     
+    # Learning analytics access (PHASE THREE)
+    "learning_analytics_v1": ["student", "parent", "teacher", "admin"],
+    
     # Handwriting exam attempt
     "handwriting_exam_attempt_v1": ["student"],
+    
+    # PHASE FOUR: Institutional analytics access
+    "institutional_analytics_v1": ["teacher", "school_admin", "admin"],
+    
+    # PHASE FOUR: Governance reporting access
+    "governance_reporting_v1": ["regulator", "board_member", "admin"],
 }
 
 
@@ -165,6 +177,60 @@ PIPELINES: dict[PipelineName, list[str]] = {
     "student_dashboard_v1": [
         "identity_subscription",
         "reporting"  # Uses reporting engine with DASHBOARD scope
+    ],
+    
+    # PHASE THREE: LEARNING ANALYTICS PIPELINE
+    # Computes longitudinal learning intelligence from historical data
+    # CRITICAL: This is READ-ONLY and does NOT alter grading
+    "learning_analytics_v1": [
+        # Step 1: Verify request authorization
+        "identity_subscription",
+        
+        # Step 2: Load historical results (READ-ONLY from Results engine)
+        "results",
+        
+        # Step 3: Load audit trail for evidence (READ-ONLY from Audit engine)
+        "audit_compliance",
+        
+        # Step 4: Compute statistical analytics (NO AI)
+        "learning_analytics",
+        
+        # Step 5: Classify mastery levels (OSS AI with deterministic fallback)
+        "mastery_modeling",
+        
+        # Step 6: Generate enhanced recommendations (extends existing engine)
+        "recommendation",
+        
+        # Step 7: Log analytics execution in audit trail
+        "audit_compliance"
+    ],
+    
+    # PHASE FOUR: INSTITUTIONAL ANALYTICS PIPELINE
+    # Aggregates student analytics into cohort-level views with privacy safeguards
+    # CRITICAL: This pipeline is READ-ONLY - NO grading modifications allowed
+    "institutional_analytics_v1": [
+        # Step 1: Verify requester role and scope access
+        "identity_subscription",
+        
+        # Step 2: Aggregate cohort-level analytics (READ-ONLY)
+        "institutional_analytics",
+        
+        # Step 3: Log analytics execution in audit trail
+        "audit_compliance"
+    ],
+    
+    # PHASE FOUR: GOVERNANCE REPORTING PIPELINE
+    # Generates regulator-safe audit and compliance reports
+    # CRITICAL: This pipeline is READ-ONLY - NO student data exposed
+    "governance_reporting_v1": [
+        # Step 1: Verify requester role (regulator/board)
+        "identity_subscription",
+        
+        # Step 2: Generate governance report (READ-ONLY)
+        "governance_reporting",
+        
+        # Step 3: Log report generation in audit trail
+        "audit_compliance"
     ]
 }
 
