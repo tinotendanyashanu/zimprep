@@ -40,6 +40,7 @@ from app.api.gateway import router as gateway_router
 from app.api.endpoints.handwriting_endpoints import router as handwriting_router
 from app.api.endpoints.practice_endpoints import router as practice_router
 from app.api.endpoints.external_api import router as external_router  # Phase 5
+from app.api.v1.resilience import router as resilience_router  # Phase 6
 
 
 # Configure logging
@@ -306,6 +307,7 @@ app.include_router(gateway_router)
 app.include_router(handwriting_router)
 app.include_router(practice_router)
 app.include_router(external_router)  # Phase 5: External API endpoints
+app.include_router(resilience_router)  # Phase 6: Mobile & Low-Connectivity Resilience
 
 
 # Root endpoint

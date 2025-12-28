@@ -210,6 +210,18 @@ def _register_engines():
     engine_registry.register("external_access_control", ExternalAccessControlEngine())
     
     # =============================================================================
+    # PHASE SIX: MOBILE & LOW-CONNECTIVITY RESILIENCE (2 engines)
+    # =============================================================================
+    
+    # Resilience Engine 1: Partial Offline Buffering
+    from app.engines.partial_offline_buffering.engine import PartialOfflineBufferingEngine
+    engine_registry.register("partial_offline_buffering", PartialOfflineBufferingEngine())
+    
+    # Resilience Engine 2: Device Connectivity Awareness
+    from app.engines.device_connectivity.engine import DeviceConnectivityEngine
+    engine_registry.register("device_connectivity", DeviceConnectivityEngine())
+    
+    # =============================================================================
     # REGISTRATION COMPLETE
     # =============================================================================
     
