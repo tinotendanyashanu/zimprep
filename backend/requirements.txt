@@ -58,3 +58,6 @@ scikit-learn>=1.3.0  # For local classification in mastery modeling
 
 # PHASE SIX: Mobile & Low-Connectivity Resilience
 cryptography>=41.0.0  # For answer buffer encryption (AES-256)
+
+# PHASE AZURE: Export Persistence
+azure-storage-blob>=12.19.0  # Azure Blob Storage for exports

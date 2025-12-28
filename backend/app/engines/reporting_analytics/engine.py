@@ -32,6 +32,7 @@ from app.engines.reporting_analytics.services.trend_analyzer import TrendAnalyze
 from app.engines.reporting_analytics.services.visualization_mapper import VisualizationMapperService
 from app.engines.reporting_analytics.services.pdf_renderer import PDFRendererService
 from app.engines.reporting_analytics.services.export_service import ExportService
+from app.engines.reporting_analytics.services.azure_export_storage_service import AzureExportStorageService
 from app.engines.reporting_analytics.services.performance_calculator import PerformanceCalculator
 from app.engines.reporting_analytics.schemas.input import ReportingScope, ExportFormat
 from app.engines.reporting_analytics.errors.exceptions import (
@@ -90,12 +91,16 @@ class ReportingAnalyticsEngine:
         except Exception as e:
             self.logger.warning(f"Failed to connect to ResultsRepository: {e}")
             self.results_repo = None
+        
+        # Initialize Azure storage service for export persistence
+        self.azure_storage = AzureExportStorageService()
     
     async def execute(
         self,
         input_data: ReportingInput,
         results_data: Dict[str, Any] | None = None,
         historical_data: List[Dict[str, Any]] | None = None,
+        engine_outputs: Dict[str, Any] | None = None,
     ) -> ReportingOutput:
         """
         Execute the 9-step reporting flow.
@@ -153,7 +158,7 @@ class ReportingAnalyticsEngine:
                 ))
             
             # Step 6: Render exports (PDF / CSV)
-            export_links = self._render_exports(
+            export_metadata = self._render_exports(
                 input_data, report_data
             )
             self._log_step(trace_id, 6, "Exports rendered")
@@ -169,7 +174,7 @@ class ReportingAnalyticsEngine:
                 input_data,
                 report_data,
                 visual_sections,
-                export_links,
+                export_metadata,
             )
             self._log_step(trace_id, 8, "Output assembled")
             
@@ -310,6 +315,7 @@ class ReportingAnalyticsEngine:
         input_data: ReportingInput,
         results: Dict[str, Any],
         historical_data: List[Dict[str, Any]] | None,
+        engine_outputs: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         """
         Step 4: Assemble report sections based on role.
@@ -357,23 +363,30 @@ class ReportingAnalyticsEngine:
             strengths = calculator.identify_strengths(dashboard_results)
             weaknesses = calculator.identify_weaknesses(dashboard_results)
 
+            # CRITICAL: Upcoming exams are NO LONGER hardcoded
+            # They are provided by the Exam Structure Engine via orchestrator
+            # If exam_structure engine hasn't run yet or failed, this will be empty
+            upcoming_exams = []
+            if engine_outputs and "exam_structure" in engine_outputs:
+                # Extract upcoming_exams from exam_structure engine output
+                exam_structure_output = engine_outputs.get("exam_structure", {})
+                upcoming_exams = exam_structure_output.get("upcoming_exams", [])
+            
+            # CRITICAL: Recommendations are NO LONGER hardcoded
+            # They will be injected by the orchestrator from the Recommendation Engine output
+            # If recommendation engine hasn't run yet or failed, this will be empty
+            # The gateway/controller is responsible for merging recommendation data
             return {
                 "dashboard": {
                     "recent_exams": recent_exams[:5], # Top 5
-                    "upcoming_exams": [],
+                    "upcoming_exams": upcoming_exams,  # From Exam Structure Engine
                     "performance": {
                         "average_grade": avg_grade,
                         "improvement_trend": improvement_trend,
                         "strengths": strengths,
                         "weaknesses": weaknesses
                     },
-                    "recommendations": [
-                         {
-                            "topic": "Algebra",
-                            "reason": "Score below 60% in last attempt",
-                            "resources": ["Chapter 5"]
-                         }
-                    ]
+                    "recommendations": []  # Empty - will be populated from Recommendation Engine
                 }
             }
         
@@ -448,7 +461,7 @@ class ReportingAnalyticsEngine:
             report_data: Complete report data
             
         Returns:
-            Dictionary of export links
+            Dictionary of export metadata (download URLs, sizes)
             
         Raises:
             ExportFailureError: If export fails
@@ -456,40 +469,126 @@ class ReportingAnalyticsEngine:
         export_service = ExportService(trace_id=input_data.trace_id)
         pdf_service = PDFRendererService(trace_id=input_data.trace_id)
         
-        file_sizes = {}
+        exports = []
+        export_metadata = {}
         
-        # Generate exports based on requested format
+        # Generate and persist exports based on requested format
         if input_data.export_format == ExportFormat.PDF:
-            pdf_bytes = pdf_service.render_report_to_pdf(
-                report_data=report_data,
-                report_type=input_data.role.value,
-                watermark_text=f"Generated: {datetime.now().isoformat()}",
-            )
-            file_sizes["pdf"] = len(pdf_bytes)
-            # TODO: Save PDF to storage
+            try:
+                # Generate PDF content
+                pdf_bytes = pdf_service.render_report_to_pdf(
+                    report_data=report_data,
+                    report_type=input_data.role.value,
+                    watermark_text=f"Generated: {datetime.now().isoformat()}",
+                )
+                
+                # Persist to Azure Blob Storage
+                azure_metadata = self.azure_storage.save_export(
+                    content=pdf_bytes,
+                    content_type="application/pdf",
+                    user_id=str(input_data.user_id),
+                    trace_id=str(input_data.trace_id),
+                    export_type="pdf",
+                    filename=f"report_{input_data.trace_id}.pdf",
+                )
+                
+                # Add to exports if successfully persisted
+                if azure_metadata:
+                    exports.append({
+                        "type": "pdf",
+                        "download_url": azure_metadata["download_url"],
+                        "content_type": azure_metadata["content_type"],
+                        "size_bytes": azure_metadata["size_bytes"],
+                    })
+                else:
+                    self.logger.warning(
+                        f"[{input_data.trace_id}] PDF export failed to persist to Azure",
+                        extra={"trace_id": str(input_data.trace_id)}
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f"[{input_data.trace_id}] PDF export generation failed",
+                    extra={"trace_id": str(input_data.trace_id), "error": str(e)},
+                    exc_info=True
+                )
         
         if input_data.export_format == ExportFormat.CSV:
-            csv_string = export_service.export_to_csv(
-                report_data=report_data,
-                report_type=input_data.role.value,
-            )
-            file_sizes["csv"] = len(csv_string.encode('utf-8'))
-            # TODO: Save CSV to storage
+            try:
+                # Generate CSV content
+                csv_string = export_service.export_to_csv(
+                    report_data=report_data,
+                    report_type=input_data.role.value,
+                )
+                csv_bytes = csv_string.encode('utf-8')
+                
+                # Persist to Azure Blob Storage
+                azure_metadata = self.azure_storage.save_export(
+                    content=csv_bytes,
+                    content_type="text/csv",
+                    user_id=str(input_data.user_id),
+                    trace_id=str(input_data.trace_id),
+                    export_type="csv",
+                    filename=f"report_{input_data.trace_id}.csv",
+                )
+                
+                # Add to exports if successfully persisted
+                if azure_metadata:
+                    exports.append({
+                        "type": "csv",
+                        "download_url": azure_metadata["download_url"],
+                        "content_type": azure_metadata["content_type"],
+                        "size_bytes": azure_metadata["size_bytes"],
+                    })
+                else:
+                    self.logger.warning(
+                        f"[{input_data.trace_id}] CSV export failed to persist to Azure",
+                        extra={"trace_id": str(input_data.trace_id)}
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f"[{input_data.trace_id}] CSV export generation failed",
+                    extra={"trace_id": str(input_data.trace_id), "error": str(e)},
+                    exc_info=True
+                )
         
         if input_data.export_format == ExportFormat.JSON:
-            json_string = export_service.export_to_json(report_data)
-            file_sizes["json"] = len(json_string.encode('utf-8'))
-            # TODO: Save JSON to storage
+            try:
+                # Generate JSON content
+                json_string = export_service.export_to_json(report_data)
+                json_bytes = json_string.encode('utf-8')
+                
+                # Persist to Azure Blob Storage
+                azure_metadata = self.azure_storage.save_export(
+                    content=json_bytes,
+                    content_type="application/json",
+                    user_id=str(input_data.user_id),
+                    trace_id=str(input_data.trace_id),
+                    export_type="json",
+                    filename=f"report_{input_data.trace_id}.json",
+                )
+                
+                # Add to exports if successfully persisted
+                if azure_metadata:
+                    exports.append({
+                        "type": "json",
+                        "download_url": azure_metadata["download_url"],
+                        "content_type": azure_metadata["content_type"],
+                        "size_bytes": azure_metadata["size_bytes"],
+                    })
+                else:
+                    self.logger.warning(
+                        f"[{input_data.trace_id}] JSON export failed to persist to Azure",
+                        extra={"trace_id": str(input_data.trace_id)}
+                    )
+            except Exception as e:
+                self.logger.error(
+                    f"[{input_data.trace_id}] JSON export generation failed",
+                    extra={"trace_id": str(input_data.trace_id), "error": str(e)},
+                    exc_info=True
+                )
         
-        # Generate download links
-        report_id = uuid4()
-        export_links = export_service.generate_export_links(
-            report_id=report_id,
-            formats=[input_data.export_format.value],
-            file_sizes=file_sizes,
-        )
-        
-        return export_links
+        # Return exports metadata (empty array if all failed)
+        return {"exports": exports}
     
     def _generate_visualizations(
         self,
@@ -520,7 +619,7 @@ class ReportingAnalyticsEngine:
         input_data: ReportingInput,
         report_data: Dict[str, Any],
         visual_sections: List[VisualSection],
-        export_links: Dict[str, Any],
+        export_metadata: Dict[str, Any],
     ) -> ReportingOutput:
         """
         Step 8: Build the final output.
@@ -529,7 +628,7 @@ class ReportingAnalyticsEngine:
             input_data: Validated input
             report_data: Complete report data
             visual_sections: Visualization sections
-            export_links: Export download links
+            export_metadata: Export metadata with download URLs
             
         Returns:
             ReportingOutput with confidence = 1.0
@@ -547,7 +646,7 @@ class ReportingAnalyticsEngine:
             generated_at=datetime.now(),
             data_payload=report_data,
             visual_sections=visual_sections,
-            export_links=export_links,
+            export_links=export_metadata,  # Now contains {"exports": [...]}
             confidence=1.0,  # Always deterministic
             trace_id=input_data.trace_id,
             metadata={

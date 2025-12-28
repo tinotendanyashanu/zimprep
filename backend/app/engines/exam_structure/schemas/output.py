@@ -3,7 +3,7 @@
 Defines the immutable exam structure returned to the orchestrator.
 """
 
-from typing import Dict
+from typing import Dict, Any
 from pydantic import BaseModel, Field
 
 from app.engines.exam_structure.schemas.section import SectionDefinition
@@ -86,6 +86,12 @@ class ExamStructureOutput(BaseModel):
         ge=0.0,
         le=1.0,
         description="Confidence score (1.0 = official verified, <1.0 = provisional)",
+    )
+    
+    # Optional: Upcoming exams (for dashboard context)
+    upcoming_exams: list[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="List of upcoming scheduled exams (when requested)",
     )
     
     class Config:

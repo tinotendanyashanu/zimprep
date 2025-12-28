@@ -25,6 +25,7 @@ from app.engines.exam_structure.repository import (
     SubjectRepository,
     SyllabusRepository,
     PaperRepository,
+    ScheduleRepository,
 )
 from app.engines.exam_structure.validators import (
     validate_section_consistency,
@@ -62,6 +63,7 @@ class ExamStructureEngine:
         self.subject_repo = SubjectRepository(mongo_client)
         self.syllabus_repo = SyllabusRepository(mongo_client)
         self.paper_repo = PaperRepository(mongo_client)
+        self.schedule_repo = ScheduleRepository(mongo_client)
     
     async def run(
         self,
@@ -99,6 +101,28 @@ class ExamStructureEngine:
                 extra={"trace_id": trace_id, "engine_version": ENGINE_VERSION}
             )
             
+            # Check if this is a dashboard request (fetch upcoming exams only)
+            is_dashboard_request = payload.get("dashboard_mode", False)  
+            
+            if is_dashboard_request:
+                # Dashboard mode: fetch upcoming exams without exam structure
+                candidate_id = payload.get("candidate_id")
+                if not candidate_id:
+                    logger.warning("Dashboard request missing candidate_id", extra={"trace_id": trace_id})
+                    return self._build_dashboard_only_response([], trace_id, start_time)
+                
+                upcoming_exams = await self._fetch_upcoming_exams(
+                    candidate_id=candidate_id,
+                    cohort_id=payload.get("cohort_id"),
+                    school_id=payload.get("school_id"),
+                    trace_id=trace_id,
+                    limit=payload.get("limit", 10),
+                    candidate_timezone=payload.get("timezone", "Africa/Harare"),  # NEW
+                )
+                
+                return self._build_dashboard_only_response(upcoming_exams, trace_id, start_time)
+            
+            # Standard exam structure resolution
             try:
                 input_data = ExamStructureInput(**payload)
             except ValidationError as e:
@@ -225,7 +249,12 @@ class ExamStructureEngine:
             total_marks=paper_total_marks,
         )
         
-        # Step 10: Return frozen output
+        # Step 10: Fetch upcoming exams if requested (dashboard context)
+        upcoming_exams = []
+        # Check if this is a dashboard request with upcoming exams
+        # This will be handled by checking payload in run() method
+        
+        # Step 11: Return frozen output
         output = ExamStructureOutput(
             subject_code=input_data.subject_code,
             subject_name=subject["name"],
@@ -239,6 +268,7 @@ class ExamStructureEngine:
             source="ZIMSEC",
             structure_hash=structure_hash,
             confidence=1.0,  # Official verified data
+            upcoming_exams=upcoming_exams,
         )
         
         execution_time_ms = int((datetime.utcnow() - datetime.fromisoformat(trace_id.split('-')[0])).total_seconds() * 1000) if '-' in trace_id else 0
@@ -351,6 +381,123 @@ class ExamStructureEngine:
         # Compute hash
         canonical = "|".join(parts)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    
+    async def _fetch_upcoming_exams(
+        self,
+        candidate_id: str,
+        cohort_id: Optional[str],
+        school_id: Optional[str],
+        trace_id: str,
+        limit: int = 10,
+        candidate_timezone: str = "Africa/Harare",  # NEW: Timezone parameter
+    ) -> list[Dict[str, Any]]:
+        """Fetch upcoming scheduled exams for a candidate.
+        
+        Args:
+            candidate_id: Candidate ID
+            cohort_id: Optional cohort ID
+            school_id: Optional school ID
+            trace_id: Trace ID for logging
+            limit: Maximum exams to return
+            candidate_timezone: Candidate's local timezone (IANA format)
+            
+        Returns:
+            List of formatted upcoming exam objects with timezone conversion
+        """
+        try:
+            # Import  timezone utilities
+            from app.utils.timezone_helper import format_exam_time, get_time_until_exam
+            
+            schedules = await self.schedule_repo.get_upcoming_exams(
+                candidate_id=candidate_id,
+                cohort_id=cohort_id,
+                school_id=school_id,
+                limit=limit,
+            )
+            
+            # Format for dashboard consumption with timezone conversion
+            upcoming_exams = []
+            for schedule in schedules:
+                scheduled_date = schedule.get("scheduled_date")
+                
+                # Format time with timezone conversion
+                time_info = format_exam_time(scheduled_date, candidate_timezone)
+                
+                # Calculate time remaining
+                time_remaining = get_time_until_exam(scheduled_date)
+                
+                upcoming_exams.append({
+                    "exam_id": schedule.get("exam_id"),
+                    "subject": schedule.get("subject_name"),
+                    "paper": schedule.get("paper_name"),
+                    "scheduled_date": time_info,  # Now includes UTC, local, timezone, display
+                    "time_remaining": time_remaining,  # Days, hours, urgency level
+                    "duration_minutes": schedule.get("duration_minutes"),
+                    "status": schedule.get("status"),
+                })
+            
+            logger.info(
+                f"Fetched {len(upcoming_exams)} upcoming exams",
+                extra={
+                    "trace_id": trace_id,
+                    "candidate_id": candidate_id,
+                    "num_exams": len(upcoming_exams),
+                    "timezone": candidate_timezone,
+                }
+            )
+            
+            return upcoming_exams
+        
+        except Exception as e:
+            logger.error(
+                f"Error fetching upcoming exams: {e}",
+                extra={
+                    "trace_id": trace_id,
+                    "candidate_id": candidate_id,
+                    "error": str(e),
+                },
+                exc_info=True
+            )
+            return []
+    
+    def _build_dashboard_only_response(
+        self,
+        upcoming_exams: list[Dict[str, Any]],
+        trace_id: str,
+        start_time: datetime,
+    ) -> EngineResponse:
+        """Build response for dashboard-only requests (no exam structure).
+        
+        Args:
+            upcoming_exams: List of upcoming exams
+            trace_id: Trace ID
+            start_time: Execution start time
+            
+        Returns:
+            EngineResponse with only upcoming_exams field
+        """
+        # Create minimal output with just upcoming exams
+        # This is used when the dashboard pipeline calls exam_structure
+        # but doesn't need actual exam structure data
+        output_data = {
+            "upcoming_exams": upcoming_exams
+        }
+        
+        trace = EngineTrace(
+            trace_id=trace_id,
+            engine_name=ENGINE_NAME,
+            engine_version=ENGINE_VERSION,
+            timestamp=datetime.utcnow(),
+            confidence=1.0,
+        )
+        
+        return EngineResponse(
+            success=True,
+            data=output_data,
+            error=None,
+            trace=trace,
+        )
+
     
     def _build_response(
         self,

@@ -1,0 +1,82 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": [
+      "request_id",
+      "exam_id",
+      "schedule_id",
+      "original_scheduled_date",
+      "new_scheduled_date",
+      "requested_by",
+      "requester_role",
+      "status",
+      "created_at"
+    ],
+    "properties": {
+      "request_id": {
+        "bsonType": "string",
+        "description": "Unique reschedule request identifier"
+      },
+      "exam_id": {
+        "bsonType": "string",
+        "description": "Exam being rescheduled"
+      },
+      "schedule_id": {
+        "bsonType": "string",
+        "description": "Exam schedule identifier"
+      },
+      "original_scheduled_date": {
+        "bsonType": "date",
+        "description": "Current/original exam date"
+      },
+      "new_scheduled_date": {
+        "bsonType": "date",
+        "description": "Proposed new exam date"
+      },
+      "reason": {
+        "bsonType": "string",
+        "description": "Reason for reschedule request",
+        "minLength": 10
+      },
+      "requested_by": {
+        "bsonType": "string",
+        "description": "User ID who requested the reschedule"
+      },
+      "requester_role": {
+        "enum": ["student", "teacher", "admin", "school_admin"],
+        "description": "Role of requester"
+      },
+      "status": {
+        "enum": ["pending", "approved", "rejected", "cancelled"],
+        "description": "Request status"
+      },
+      "reviewed_by": {
+        "bsonType": "string",
+        "description": "Admin who reviewed the request"
+      },
+      "reviewed_at": {
+        "bsonType": "date",
+        "description": "Review timestamp"
+      },
+      "review_notes": {
+        "bsonType": "string",
+        "description": "Admin's review notes/comments"
+      },
+      "affected_candidates": {
+        "bsonType": "array",
+        "description": "List of candidates affected by this reschedule",
+        "items": {
+          "bsonType": "string"
+        }
+      },
+      "created_at": {
+        "bsonType": "date",
+        "description": "Request creation timestamp"
+      },
+      "updated_at": {
+        "bsonType": "date",
+        "description": "Last update timestamp"
+      }
+    }
+  }
+}

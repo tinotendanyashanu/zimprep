@@ -1,0 +1,71 @@
+{
+  "$jsonSchema": {
+    "bsonType": "object",
+    "required": [
+      "notification_id",
+      "candidate_id",
+      "notification_type",
+      "status",
+      "created_at"
+    ],
+    "properties": {
+      "notification_id": {
+        "bsonType": "string",
+        "description": "Unique notification identifier"
+      },
+      "candidate_id": {
+        "bsonType": "string",
+        "description": "Candidate receiving the notification"
+      },
+      "notification_type": {
+        "enum": ["exam_reminder", "exam_cancelled", "exam_rescheduled", "result_available"],
+        "description": "Type of notification"
+      },
+      "exam_id": {
+        "bsonType": "string",
+        "description": "Related exam identifier (optional for some notification types)"
+      },
+      "schedule_id": {
+        "bsonType": "string",
+        "description": "Related exam schedule identifier"
+      },
+      "scheduled_date": {
+        "bsonType": "date",
+        "description": "Exam scheduled date (for context)"
+      },
+      "reminder_interval": {
+        "enum": ["7_days", "3_days", "1_day", "1_hour"],
+        "description": "Reminder interval (for exam_reminder type)"
+      },
+      "status": {
+        "enum": ["pending", "sent", "failed", "cancelled"],
+        "description": "Notification delivery status"
+      },
+      "delivery_method": {
+        "enum": ["email", "sms", "push", "in_app"],
+        "description": "Delivery channel",
+        "default": "email"
+      },
+      "sent_at": {
+        "bsonType": "date",
+        "description": "Timestamp when notification was sent"
+      },
+      "failed_reason": {
+        "bsonType": "string",
+        "description": "Reason for failure (if status is failed)"
+      },
+      "metadata": {
+        "bsonType": "object",
+        "description": "Additional notification data (subject, paper, etc.)"
+      },
+      "created_at": {
+        "bsonType": "date",
+        "description": "Notification creation timestamp"
+      },
+      "updated_at": {
+        "bsonType": "date",
+        "description": "Last update timestamp"
+      }
+    }
+  }
+}

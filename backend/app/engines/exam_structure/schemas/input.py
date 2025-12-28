@@ -3,6 +3,7 @@
 Defines the contract for incoming structure resolution requests.
 """
 
+from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -62,3 +63,25 @@ class ExamStructureInput(BaseModel):
         if not v.replace("-", "").replace("_", "").isalnum():
             raise ValueError("Subject code must be alphanumeric")
         return v
+
+
+class DashboardExamStructureInput(BaseModel):
+    """Extended input for dashboard context with upcoming exams.
+    
+    Used when requesting exam structure + upcoming exams together.
+    """
+    
+    trace_id: str = Field(..., description="Request trace identifier")
+    user_id: str = Field(..., description="User identifier for audit trail")
+    
+    # Optional: Can request structure for a specific exam
+    subject_code: Optional[str] = Field(None, description="ZIMSEC subject code")
+    syllabus_version: Optional[str] = Field(None, description="Syllabus version")
+    paper_code: Optional[str] = Field(None, description="Paper identifier")
+    
+    # Required for upcoming exams
+    candidate_id: str = Field(..., description="Candidate ID for personalized upcoming exams")
+    cohort_id: Optional[str] = Field(None, description="Cohort ID for filtering")
+    school_id: Optional[str] = Field(None, description="School ID for filtering")
+    include_upcoming_exams: bool = Field(default=True, description="Include upcoming exams")
+

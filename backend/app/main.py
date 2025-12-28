@@ -37,6 +37,7 @@ from app.orchestrator.orchestrator import (
 
 # Import API Gateway
 from app.api.gateway import router as gateway_router
+from app.api.endpoints.dashboard_endpoints import router as dashboard_router
 from app.api.endpoints.handwriting_endpoints import router as handwriting_router
 from app.api.endpoints.practice_endpoints import router as practice_router
 from app.api.endpoints.external_api import router as external_router  # Phase 5
@@ -304,6 +305,7 @@ async def health_check():
 
 # Register API routers
 app.include_router(gateway_router)
+app.include_router(dashboard_router)  # Dashboard endpoints (recommendations integration)
 app.include_router(handwriting_router)
 app.include_router(practice_router)
 app.include_router(external_router)  # Phase 5: External API endpoints

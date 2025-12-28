@@ -60,6 +60,13 @@ class Settings(BaseSettings):
     # Maximum time to wait for AI API responses before failing gracefully
     AI_TIMEOUT_SECONDS: int = 30
     
+    # ===== AZURE BLOB STORAGE (EXPORT PERSISTENCE) =====
+    # Azure Storage Account credentials for export persistence
+    AZURE_STORAGE_ACCOUNT_NAME: str = ""
+    AZURE_STORAGE_ACCOUNT_KEY: str = ""
+    AZURE_EXPORT_CONTAINER: str = "zimprep-exports"
+    AZURE_EXPORT_SAS_EXPIRY_SECONDS: int = 900  # 15 minutes
+    
     # ===== BILLING INTEGRATION (REQUIRED) =====
     # Webhook secret for billing provider callbacks
     BILLING_WEBHOOK_SECRET: str = ""
@@ -112,6 +119,28 @@ class Settings(BaseSettings):
             )
         return v
     
+    @field_validator("AZURE_STORAGE_ACCOUNT_NAME")
+    @classmethod
+    def validate_azure_account_name(cls, v: str, info) -> str:
+        """Ensure Azure storage account name is set in production."""
+        env = info.data.get("ENV", "development")
+        if env == "production" and not v:
+            raise ValueError(
+                "AZURE_STORAGE_ACCOUNT_NAME is required in production for export persistence"
+            )
+        return v
+    
+    @field_validator("AZURE_STORAGE_ACCOUNT_KEY")
+    @classmethod
+    def validate_azure_account_key(cls, v: str, info) -> str:
+        """Ensure Azure storage account key is set in production."""
+        env = info.data.get("ENV", "development")
+        if env == "production" and not v:
+            raise ValueError(
+                "AZURE_STORAGE_ACCOUNT_KEY is required in production for export persistence"
+            )
+        return v
+    
     class Config:
         env_file = ".env"
         case_sensitive = True
@@ -145,6 +174,7 @@ def validate_environment() -> Settings:
                 "redis_configured": bool(settings_instance.REDIS_URL),
                 "openai_configured": bool(settings_instance.OPENAI_API_KEY),
                 "billing_configured": bool(settings_instance.BILLING_WEBHOOK_SECRET),
+                "azure_storage_configured": bool(settings_instance.AZURE_STORAGE_ACCOUNT_NAME and settings_instance.AZURE_STORAGE_ACCOUNT_KEY),
             }
         )
         

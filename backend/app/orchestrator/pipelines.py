@@ -182,9 +182,34 @@ PIPELINES: dict[PipelineName, list[str]] = {
 
     # DASHBOARD PIPELINE
     # Used for fetching student dashboard data
+    # CRITICAL: Exam Structure Engine runs AFTER identity to fetch upcoming exams
+    # Recommendation engine runs AFTER reporting to generate personalized recommendations
     "student_dashboard_v1": [
         "identity_subscription",
-        "reporting"  # Uses reporting engine with DASHBOARD scope
+        "exam_structure",  # NEW: Fetches upcoming exams using candidate_id from identity
+        "reporting",  # Uses reporting engine with DASHBOARD scope
+        "recommendation"  # Generates AI-powered study recommendations
+    ],
+    
+    # EXAM RESCHEDULE PIPELINES
+    # Request reschedule (students, teachers, admins)
+    "exam_reschedule_request_v1": [
+        "identity_subscription",
+        "exam_reschedule",  # Create reschedule request
+        "audit_compliance"
+    ],
+    
+    # Approve/reject reschedule (admins only)
+    "exam_reschedule_approval_v1": [
+        "identity_subscription",  # Verify admin role
+        "exam_reschedule",  # Approve/reject request
+        "audit_compliance"
+    ],
+    
+    # List pending reschedule requests (admins)
+    "exam_reschedule_list_v1": [
+        "identity_subscription",
+        "exam_reschedule",  # List pending requests
     ],
     
     # PHASE THREE: LEARNING ANALYTICS PIPELINE
