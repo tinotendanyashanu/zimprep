@@ -32,6 +32,7 @@ from app.engines.reporting_analytics.services.trend_analyzer import TrendAnalyze
 from app.engines.reporting_analytics.services.visualization_mapper import VisualizationMapperService
 from app.engines.reporting_analytics.services.pdf_renderer import PDFRendererService
 from app.engines.reporting_analytics.services.export_service import ExportService
+from app.engines.reporting_analytics.services.performance_calculator import PerformanceCalculator
 from app.engines.reporting_analytics.schemas.input import ReportingScope, ExportFormat
 from app.engines.reporting_analytics.errors.exceptions import (
     ReportingEngineError,
@@ -349,15 +350,22 @@ class ReportingAnalyticsEngine:
                     "history": recent_exams  # Return all, no truncation
                 }
 
+            # Calculate real performance metrics from database
+            calculator = PerformanceCalculator()
+            avg_grade = calculator.calculate_average_grade(dashboard_results)
+            improvement_trend = calculator.calculate_improvement_trend(dashboard_results)
+            strengths = calculator.identify_strengths(dashboard_results)
+            weaknesses = calculator.identify_weaknesses(dashboard_results)
+
             return {
                 "dashboard": {
                     "recent_exams": recent_exams[:5], # Top 5
                     "upcoming_exams": [],
                     "performance": {
-                        "average_grade": "B", # Mock
-                        "improvement_trend": "stable",
-                        "strengths": ["Mathematics"],
-                        "weaknesses": ["Physics"]
+                        "average_grade": avg_grade,
+                        "improvement_trend": improvement_trend,
+                        "strengths": strengths,
+                        "weaknesses": weaknesses
                     },
                     "recommendations": [
                          {
