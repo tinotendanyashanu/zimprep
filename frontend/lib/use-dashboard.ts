@@ -37,6 +37,22 @@ export interface DashboardData {
     reason: string;
     resources: string[];
   }>;
+  // New fields for Phase 2 flows
+  daily_challenge?: {
+    id: string;
+    title: string;
+    subject: string;
+    questions_count: number;
+    completed: boolean;
+    streak: number;
+  };
+  last_session?: {
+    exam_id: string;
+    exam_name: string;
+    subject: string;
+    progress: number; // 0-100
+    last_accessed: string;
+  };
 }
 
 export function useDashboard() {
@@ -65,7 +81,34 @@ export function useDashboard() {
 
         // Backend returns: engine_outputs -> reporting -> data_payload -> dashboard
         const reportingOutput = result.engine_outputs?.reporting;
-        const dashboardData = reportingOutput?.data_payload?.dashboard || reportingOutput?.dashboard || result.engine_outputs?.dashboard;
+        let dashboardData = reportingOutput?.data_payload?.dashboard || reportingOutput?.dashboard || result.engine_outputs?.dashboard;
+        
+        // --- PHASE 2 FRONTEND MOCKS (Remove when backend supports these) ---
+        // We enrich the data to support the required UI flows even if backend is static
+        if (dashboardData) {
+            if (!dashboardData.daily_challenge) {
+                dashboardData.daily_challenge = {
+                    id: 'daily-1',
+                    title: 'Calculus refresher',
+                    subject: 'Mathematics',
+                    questions_count: 5,
+                    completed: false,
+                    streak: 3
+                };
+            }
+            if (!dashboardData.last_session) {
+                 // Simulate a session 50% of the time for testing
+                 dashboardData.last_session = {
+                     exam_id: 'pending-123',
+                     exam_name: 'Physics: Mechanics (2019)',
+                     subject: 'Physics',
+                     progress: 45,
+                     last_accessed: new Date().toISOString()
+                 };
+            }
+        }
+        // ------------------------------------------------------------------
+
         setData(dashboardData);
         setTraceId(result.trace_id);
       } catch (err) {

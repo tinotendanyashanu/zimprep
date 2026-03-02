@@ -7,10 +7,9 @@ import logging
 from datetime import datetime
 from typing import List, Dict, Any, Optional
 
-from pymongo import MongoClient, ASCENDING
+from pymongo import ASCENDING
 from pymongo.errors import PyMongoError
-
-from app.config.settings import settings
+from pymongo.database import Database
 
 logger = logging.getLogger(__name__)
 
@@ -24,18 +23,18 @@ class ScheduleRepository:
     - Timezone-safe datetime handling (all UTC)
     """
     
-    def __init__(self, mongo_client: Optional[MongoClient] = None):
+    def __init__(self, database: Optional[Database] = None):
         """Initialize repository with MongoDB connection.
         
         Args:
-            mongo_client: Optional MongoDB client (for testing)
+            database: Optional MongoDB database (for testing)
         """
-        if mongo_client is None:
-            self.client = MongoClient(settings.MONGODB_URI)
+        if database is None:
+            from app.config.database import get_database
+            self.db = get_database()
         else:
-            self.client = mongo_client
+            self.db = database
         
-        self.db = self.client[settings.MONGODB_DB]
         self.collection = self.db["exam_schedules"]
     
     async def get_upcoming_exams(

@@ -166,7 +166,7 @@ export function ExamCountdown({
             {scheduledDate.display}
           </div>
           
-          <div class Name={`text-xl font-mono ${urgencyColors[timeRemaining.urgency]}`}>
+          <div className={`text-xl font-mono ${urgencyColors[timeRemaining.urgency]}`}>
             {timeRemaining.display}
           </div>
           

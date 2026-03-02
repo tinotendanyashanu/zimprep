@@ -89,6 +89,8 @@ def _register_engines():
     """
     logger.info("Starting engine registration...")
     
+
+    
     # =============================================================================
     # CORE ENGINES (9 engines)
     # =============================================================================
@@ -127,8 +129,15 @@ def _register_engines():
     
     # Engine 9: Identity & Subscription
     from app.engines.identity_subscription.engine import IdentitySubscriptionEngine
-    engine_registry.register("identity_subscription", IdentitySubscriptionEngine())
+    identity_engine = IdentitySubscriptionEngine()
+    engine_registry.register("identity_subscription", identity_engine)
+    # PHASE 0 FIX: Register 'identity' alias for pipeline compatibility
+    engine_registry.register("identity", identity_engine)
     
+    # Engine 10: Exam Reschedule
+    from app.engines.exam_reschedule.engine import ExamRescheduleEngine
+    engine_registry.register("exam_reschedule", ExamRescheduleEngine())
+
     # =============================================================================
     # AI ENGINES (8 engines)
     # =============================================================================

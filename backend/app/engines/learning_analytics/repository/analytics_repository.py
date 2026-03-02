@@ -36,14 +36,19 @@ class LearningAnalyticsRepository:
             database_name: Database name (default: "zimprep")
         """
         if mongo_client is None:
-            mongo_client = MongoClient("mongodb://localhost:27017/")
+            # Use centralized database configuration
+            from app.config.database import get_database
+            self.db = get_database()
+            self.client = self.db.client
+        else:
+            self.client = mongo_client
+            self.db = self.client[database_name]
         
-        self.client = mongo_client
-        self.db = self.client[database_name]
         self.collection = self.db[self.COLLECTION_NAME]
         
         # Ensure indexes exist
-        self._ensure_indexes()
+        # NOTE: Commented out to prevent database connection during module import
+        # self._ensure_indexes()
     
     def _ensure_indexes(self) -> None:
         """Create required indexes for performance and integrity."""

@@ -21,9 +21,9 @@ class ConnectivityRepository:
     
     def __init__(self):
         """Initialize repository with MongoDB connection."""
-        mongodb_uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017/zimprep")
-        self.client = AsyncIOMotorClient(mongodb_uri)
-        self.db = self.client.get_database()
+        from app.config.settings import settings
+        self.client = AsyncIOMotorClient(settings.MONGODB_URI)
+        self.db = self.client[settings.MONGODB_DB]  # Explicit database name
         self.collection = self.db.device_connectivity_events
         
     async def log_heartbeat(

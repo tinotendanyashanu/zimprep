@@ -39,7 +39,8 @@ class ResultsRepository:
         self.collection = self.db[self.COLLECTION_NAME]
         
         # Ensure indexes exist
-        self._ensure_indexes()
+        # NOTE: Commented out to prevent database connection during module import
+        # self._ensure_indexes()
     
     def _ensure_indexes(self):
         """Create required database indexes."""

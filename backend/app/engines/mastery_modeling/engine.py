@@ -17,7 +17,7 @@ from pymongo import MongoClient
 from pydantic import ValidationError
 
 from app.orchestrator.execution_context import ExecutionContext
-from app.orchestrator.engine_response import EngineResponse
+from app.contracts.engine_response import EngineResponse
 from app.engines.mastery_modeling.schemas.input import MasteryModelingInput
 from app.engines.mastery_modeling.schemas.output import (
     MasteryModelingOutput,

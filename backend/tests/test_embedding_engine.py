@@ -44,7 +44,8 @@ class TestEmbeddingEngine:
     async def test_valid_input_successful_embedding(self, engine, valid_payload):
         """Test that valid input produces successful embedding."""
         # Arrange
-        context = ExecutionContext(trace_id=valid_payload["trace_id"])
+        context = ExecutionContext.create(request_source="test")
+        valid_payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(valid_payload, context)
@@ -82,7 +83,8 @@ class TestEmbeddingEngine:
             "student_id": "student_test",
             # Missing question_id and other required fields
         }
-        context = ExecutionContext(trace_id="trace_123")
+        context = ExecutionContext.create(request_source="test")
+        invalid_payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(invalid_payload, context)
@@ -98,7 +100,8 @@ class TestEmbeddingEngine:
     async def test_deterministic_embedding(self, engine, valid_payload):
         """Test that same input produces identical embedding."""
         # Arrange
-        context = ExecutionContext(trace_id=valid_payload["trace_id"])
+        context = ExecutionContext.create(request_source="test")
+        valid_payload["trace_id"] = context.trace_id
         
         # Act - Generate embedding twice
         response1 = await engine.run(valid_payload, context)
@@ -124,8 +127,8 @@ class TestEmbeddingEngine:
             # Arrange
             payload = valid_payload.copy()
             payload["answer_type"] = answer_type
-            payload["trace_id"] = f"trace_{answer_type}"
-            context = ExecutionContext(trace_id=payload["trace_id"])
+            context = ExecutionContext.create(request_source="test")
+            payload["trace_id"] = context.trace_id
             
             # Act
             response = await engine.run(payload, context)
@@ -148,8 +151,8 @@ class TestEmbeddingEngine:
         payload = valid_payload.copy()
         payload["answer_type"] = "structured"
         payload["raw_student_answer"] = structured_answer
-        payload["trace_id"] = "trace_structured"
-        context = ExecutionContext(trace_id="trace_structured")
+        context = ExecutionContext.create(request_source="test")
+        payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(payload, context)
@@ -169,7 +172,8 @@ class TestEmbeddingEngine:
         # Arrange
         payload = valid_payload.copy()
         payload["max_marks"] = 0  # Invalid
-        context = ExecutionContext(trace_id=payload["trace_id"])
+        context = ExecutionContext.create(request_source="test")
+        payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(payload, context)
@@ -185,7 +189,8 @@ class TestEmbeddingEngine:
         # Arrange
         payload = valid_payload.copy()
         payload["raw_student_answer"] = ""
-        context = ExecutionContext(trace_id=payload["trace_id"])
+        context = ExecutionContext.create(request_source="test")
+        payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(payload, context)
@@ -199,7 +204,8 @@ class TestEmbeddingEngine:
     async def test_metadata_preservation(self, engine, valid_payload):
         """Test that all metadata is preserved in output."""
         # Arrange
-        context = ExecutionContext(trace_id=valid_payload["trace_id"])
+        context = ExecutionContext.create(request_source="test")
+        valid_payload["trace_id"] = context.trace_id
         
         # Act
         response = await engine.run(valid_payload, context)

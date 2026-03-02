@@ -1,12 +1,34 @@
 """Exam Structure Engine
 
-Main orchestrator-facing entry point for exam structure resolution.
+DERIVATION-BASED ARCHITECTURE (ACTION 3)
+=========================================
+
+This engine derives ALL exam structure from the canonical_questions collection.
+
+NO phantom collections are queried:
+- subjects ❌ (does not exist)
+- syllabuses ❌ (does not exist)
+- papers ❌ (does not exist)
+- paper_sections ❌ (does not exist)
+
+CANONICAL SOURCE OF TRUTH:
+- canonical_questions → subjects, levels, years, papers, question counts
+
+DERIVATION LOGIC:
+- subjects = distinct("subject")
+- levels = distinct("level")
+- years = distinct("year")
+- papers = distinct("paper")
+- question_count = count per (subject, year, paper)
+- exam_metadata = DERIVED (duration/marks use fallback values)
+
+All queries are deterministic and derived from ingestion data.
 """
 
 import logging
 import hashlib
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 
 from pydantic import ValidationError
 from pymongo import MongoClient
@@ -14,6 +36,7 @@ from pymongo import MongoClient
 from app.contracts.engine_response import EngineResponse
 from app.contracts.trace import EngineTrace
 from app.orchestrator.execution_context import ExecutionContext
+from app.config.knowledge_contract import CANONICAL_QUESTIONS
 
 from app.engines.exam_structure.schemas import (
     ExamStructureInput,
@@ -21,49 +44,56 @@ from app.engines.exam_structure.schemas import (
     SectionDefinition,
     QuestionType,
 )
-from app.engines.exam_structure.repository import (
-    SubjectRepository,
-    SyllabusRepository,
-    PaperRepository,
-    ScheduleRepository,
-)
-from app.engines.exam_structure.validators import (
-    validate_section_consistency,
-    validate_mark_consistency,
-)
+from app.engines.exam_structure.repository import ScheduleRepository
 from app.engines.exam_structure.errors import (
     ExamStructureException,
-    SubjectNotFoundError,
-    InvalidSyllabusVersionError,
-    PaperNotFoundError,
-    SectionDefinitionError,
-    MarkAllocationMismatchError,
+    NoSubjectsFoundError,
+    NoPapersFoundError,
+    NoQuestionsFoundError,
     DatabaseError,
 )
 
 logger = logging.getLogger(__name__)
 
 ENGINE_NAME = "exam_structure"
-ENGINE_VERSION = "1.0.0"
+ENGINE_VERSION = "2.0.0"  # ACTION 3: Derivation-based architecture
+
+
+# Fallback metadata for derived exams (since we don't have authoritative data)
+DEFAULT_EXAM_DURATION_MINUTES = 120
+DEFAULT_MARKS_PER_QUESTION = 10
+DEFAULT_PAPER_NAMES = {
+    "1": "Paper 1",
+    "2": "Paper 2",
+    "3": "Paper 3",
+}
 
 
 class ExamStructureEngine:
     """Production-grade exam structure engine for ZimPrep.
     
-    Defines the official ZIMSEC exam blueprint according to standards.
-    Fails closed on any inconsistency or error.
+    DERIVATION-BASED (ACTION 3):
+    - ALL structure derived from canonical_questions
+    - NO phantom collections queried
+    - Fail-fast on empty data
+    - Explicit error messages with trace_id
     """
     
     def __init__(self, mongo_client: Optional[MongoClient] = None):
-        """Initialize engine with repository dependencies.
+        """Initialize engine with MongoDB client.
         
         Args:
             mongo_client: MongoDB client instance (optional, for testing)
         """
-        self.subject_repo = SubjectRepository(mongo_client)
-        self.syllabus_repo = SyllabusRepository(mongo_client)
-        self.paper_repo = PaperRepository(mongo_client)
-        self.schedule_repo = ScheduleRepository(mongo_client)
+        if mongo_client is None:
+            from app.config.database import get_database
+            db = get_database()
+            self.mongo_client = db.client
+            self._db_name = db.name
+        else:
+            self.mongo_client = mongo_client
+            self._db_name = "zimprep"
+        self.schedule_repo = ScheduleRepository(self.mongo_client)
     
     async def run(
         self,
@@ -72,17 +102,11 @@ class ExamStructureEngine:
     ) -> EngineResponse[ExamStructureOutput]:
         """Execute exam structure resolution engine.
         
-        Implements the mandatory 10-step execution flow:
+        DERIVATION FLOW:
         1. Validate input contract
-        2. Load subject definition
-        3. Load syllabus definition
-        4. Load paper definition
-        5. Load section layout
-        6. Validate section definitions
-        7. Validate total mark consistency
-        8. Compute section totals
-        9. Generate deterministic structure hash
-        10. Return frozen output
+        2. Derive structure from canonical_questions
+        3. Validate derived data is non-empty
+        4. Return frozen output with confidence < 1.0 (derived data)
         
         Args:
             payload: Input payload dictionary
@@ -95,14 +119,13 @@ class ExamStructureEngine:
         trace_id = context.trace_id
         
         try:
-            # Step 1: Validate input contract
             logger.info(
-                "Exam Structure Engine execution started",
+                "Exam Structure Engine execution started (DERIVATION MODE)",
                 extra={"trace_id": trace_id, "engine_version": ENGINE_VERSION}
             )
             
             # Check if this is a dashboard request (fetch upcoming exams only)
-            is_dashboard_request = payload.get("dashboard_mode", False)  
+            is_dashboard_request = payload.get("dashboard_mode", False)
             
             if is_dashboard_request:
                 # Dashboard mode: fetch upcoming exams without exam structure
@@ -117,7 +140,7 @@ class ExamStructureEngine:
                     school_id=payload.get("school_id"),
                     trace_id=trace_id,
                     limit=payload.get("limit", 10),
-                    candidate_timezone=payload.get("timezone", "Africa/Harare"),  # NEW
+                    candidate_timezone=payload.get("timezone", "Africa/Harare"),
                 )
                 
                 return self._build_dashboard_only_response(upcoming_exams, trace_id, start_time)
@@ -136,8 +159,8 @@ class ExamStructureEngine:
                     start_time=start_time,
                 )
             
-            # Execute core logic
-            output = await self._execute_structure_resolution(
+            # Execute core derivation logic
+            output = await self._execute_structure_derivation(
                 input_data=input_data,
                 trace_id=trace_id,
             )
@@ -183,159 +206,204 @@ class ExamStructureEngine:
                 start_time=start_time,
             )
     
-    async def _execute_structure_resolution(
+    async def _execute_structure_derivation(
         self,
         input_data: ExamStructureInput,
         trace_id: str,
     ) -> ExamStructureOutput:
-        """Execute core structure resolution logic.
+        """Execute core structure derivation logic.
         
-        Steps 2-10 of the mandatory execution flow.
+        DERIVATION STEPS:
+        1. Verify MongoDB connection
+        2. Derive subject metadata
+        3. Derive paper metadata
+        4. Count questions
+        5. Generate fallback exam metadata
+        6. Return derived structure
         
         Args:
             input_data: Validated input
             trace_id: Trace ID
             
         Returns:
-            ExamStructureOutput
+            ExamStructureOutput with derived data
+            
+        Raises:
+            NoQuestionsFoundError: No questions found for paper
+            DatabaseError: MongoDB connection failed
         """
-        # Step 2: Load subject definition
-        subject = await self.subject_repo.get_subject(
-            subject_code=input_data.subject_code,
-            trace_id=trace_id,
+        if not self.mongo_client:
+            raise DatabaseError(
+                message="MongoDB client not initialized",
+                trace_id=trace_id,
+                metadata={"subject_code": input_data.subject_code},
+            )
+        
+        db = self.mongo_client[self._db_name]
+        collection = db[CANONICAL_QUESTIONS]
+        
+        # Derive subject name (fallback to subject_code if not derivable)
+        subject_name = input_data.subject_code  # Fallback
+        
+        # Derive paper name (use default mapping or fallback)
+        paper_name = DEFAULT_PAPER_NAMES.get(
+            input_data.paper_code,
+            f"Paper {input_data.paper_code}"
         )
         
-        # Step 3: Load syllabus definition
-        syllabus = await self.syllabus_repo.get_syllabus(
-            subject_code=input_data.subject_code,
-            syllabus_version=input_data.syllabus_version,
-            trace_id=trace_id,
-        )
+        # Count questions for this exact (subject, level, year, paper) combination
+        question_count = collection.count_documents({
+            "subject": input_data.subject_code,
+            "level": input_data.syllabus_version,
+            "year": str(input_data.year) if hasattr(input_data, 'year') else None,
+            "paper": input_data.paper_code,
+        })
         
-        # Step 4: Load paper definition
-        paper = await self.paper_repo.get_paper(
-            subject_code=input_data.subject_code,
-            syllabus_version=input_data.syllabus_version,
-            paper_code=input_data.paper_code,
-            trace_id=trace_id,
-        )
+        # FAIL-FAST: No questions found
+        if question_count == 0:
+            logger.error(
+                "No questions found for paper",
+                extra={
+                    "trace_id": trace_id,
+                    "subject": input_data.subject_code,
+                    "level": input_data.syllabus_version,
+                    "paper": input_data.paper_code,
+                }
+            )
+            raise NoQuestionsFoundError(
+                message=f"No questions found for {input_data.subject_code} "
+                        f"(level: {input_data.syllabus_version}, paper: {input_data.paper_code}). "
+                        f"Cannot create exam with empty question set.",
+                trace_id=trace_id,
+                metadata={
+                    "subject": input_data.subject_code,
+                    "level": input_data.syllabus_version,
+                    "paper": input_data.paper_code,
+                    "question_count": 0,
+                },
+            )
         
-        # Step 5: Load section layout
-        paper_id = str(paper["_id"])
-        sections_raw = await self.paper_repo.get_sections(
-            paper_id=paper_id,
-            trace_id=trace_id,
-        )
+        # Derive exam metadata (using fallback values)
+        duration_minutes = DEFAULT_EXAM_DURATION_MINUTES
+        total_marks = question_count * DEFAULT_MARKS_PER_QUESTION
         
-        # Convert to Pydantic models
-        sections = self._parse_sections(sections_raw, trace_id)
+        # Create single section (since we don't have section definitions)
+        sections = [
+            SectionDefinition(
+                section_id="A",
+                section_name="Section A",
+                question_type=QuestionType.STRUCTURED,
+                num_questions=question_count,
+                marks_per_question=DEFAULT_MARKS_PER_QUESTION,
+                total_marks=total_marks,
+                is_compulsory=True,
+            )
+        ]
         
-        # Step 6: Validate section definitions
-        validate_section_consistency(sections, trace_id)
-        
-        # Step 7: Validate total mark consistency
-        paper_total_marks = paper["total_marks"]
-        validate_mark_consistency(sections, paper_total_marks, trace_id)
-        
-        # Step 8: Compute section totals (already in sections, just create breakdown)
-        mark_breakdown = {s.section_id: s.total_marks for s in sections}
-        
-        # Step 9: Generate deterministic structure hash
+        # Generate structure hash
         structure_hash = self._generate_structure_hash(
             subject_code=input_data.subject_code,
             syllabus_version=input_data.syllabus_version,
             paper_code=input_data.paper_code,
             sections=sections,
-            total_marks=paper_total_marks,
+            total_marks=total_marks,
         )
-        
-        # Step 10: Fetch upcoming exams if requested (dashboard context)
-        upcoming_exams = []
-        # Check if this is a dashboard request with upcoming exams
-        # This will be handled by checking payload in run() method
-        
-        # Step 11: Return frozen output
-        output = ExamStructureOutput(
-            subject_code=input_data.subject_code,
-            subject_name=subject["name"],
-            syllabus_version=input_data.syllabus_version,
-            paper_code=input_data.paper_code,
-            paper_name=paper["paper_name"],
-            duration_minutes=paper["duration_minutes"],
-            total_marks=paper_total_marks,
-            sections=sections,
-            mark_breakdown=mark_breakdown,
-            source="ZIMSEC",
-            structure_hash=structure_hash,
-            confidence=1.0,  # Official verified data
-            upcoming_exams=upcoming_exams,
-        )
-        
-        execution_time_ms = int((datetime.utcnow() - datetime.fromisoformat(trace_id.split('-')[0])).total_seconds() * 1000) if '-' in trace_id else 0
         
         logger.info(
-            "Structure resolution completed successfully",
+            "Structure derivation completed successfully",
             extra={
                 "trace_id": trace_id,
                 "subject_code": input_data.subject_code,
                 "paper_code": input_data.paper_code,
                 "structure_hash": structure_hash,
-                "num_sections": len(sections),
-                "total_marks": paper_total_marks,
+                "question_count": question_count,
+                "total_marks": total_marks,
+                "derivation_mode": "canonical_questions",
             }
+        )
+        
+        # Return derived output with confidence < 1.0 (since metadata is inferred)
+        output = ExamStructureOutput(
+            subject_code=input_data.subject_code,
+            subject_name=subject_name,
+            syllabus_version=input_data.syllabus_version,
+            paper_code=input_data.paper_code,
+            paper_name=paper_name,
+            duration_minutes=duration_minutes,
+            total_marks=total_marks,
+            sections=sections,
+            mark_breakdown={"A": total_marks},
+            source="DERIVED",  # Indicate this is derived, not authoritative
+            structure_hash=structure_hash,
+            confidence=0.8,  # Lower confidence for derived data
+            upcoming_exams=[],
         )
         
         return output
     
-    def _parse_sections(
-        self,
-        sections_raw: list[Dict[str, Any]],
-        trace_id: str,
-    ) -> list[SectionDefinition]:
-        """Parse raw section documents to SectionDefinition models.
+    async def list_available_subjects(self, trace_id: str) -> List[Dict[str, Any]]:
+        """List all available subjects from canonical_questions.
+        
+        Used by dashboard to show subjects student can practice.
         
         Args:
-            sections_raw: Raw MongoDB documents
-            trace_id: Trace ID
+            trace_id: Trace ID for logging
             
         Returns:
-            List of validated SectionDefinition objects
+            List of subject dictionaries with metadata
             
         Raises:
-            SectionDefinitionError: Section parsing failed
+            NoSubjectsFoundError: No subjects found in canonical_questions
+            DatabaseError: MongoDB connection failed
         """
-        sections = []
+        if not self.mongo_client:
+            raise DatabaseError(
+                message="MongoDB client not initialized",
+                trace_id=trace_id,
+                metadata={},
+            )
         
-        for section_doc in sections_raw:
-            try:
-                section = SectionDefinition(
-                    section_id=section_doc["section_id"],
-                    section_name=section_doc["section_name"],
-                    question_type=QuestionType(section_doc["question_type"]),
-                    num_questions=section_doc["num_questions"],
-                    marks_per_question=section_doc["marks_per_question"],
-                    total_marks=section_doc.get("total_marks", 
-                                                section_doc["num_questions"] * section_doc["marks_per_question"]),
-                    is_compulsory=section_doc.get("is_compulsory", True),
-                )
-                sections.append(section)
-            except (KeyError, ValueError, ValidationError) as e:
-                logger.error(
-                    "Failed to parse section",
-                    extra={
-                        "trace_id": trace_id,
-                        "section_doc": section_doc,
-                        "error": str(e),
-                    },
-                    exc_info=True
-                )
-                raise SectionDefinitionError(
-                    message=f"Failed to parse section: {str(e)}",
-                    trace_id=trace_id,
-                    metadata={"section_doc": section_doc},
-                )
+        db = self.mongo_client[self._db_name]
+        collection = db[CANONICAL_QUESTIONS]
         
-        return sections
+        # Derive distinct subjects
+        subjects = collection.distinct("subject")
+        
+        # FAIL-FAST: No subjects found
+        if not subjects:
+            logger.error(
+                "No subjects found in canonical_questions",
+                extra={"trace_id": trace_id}
+            )
+            raise NoSubjectsFoundError(
+                message="No subjects found in canonical_questions collection. "
+                        "Ingestion data may not be loaded.",
+                trace_id=trace_id,
+                metadata={"collection": CANONICAL_QUESTIONS},
+            )
+        
+        # Build subject list with metadata
+        subject_list = []
+        for subject in subjects:
+            # Count questions for this subject
+            question_count = collection.count_documents({"subject": subject})
+            
+            # Get available years
+            years = collection.distinct("year", {"subject": subject})
+            
+            subject_list.append({
+                "subject_code": subject,
+                "subject_name": subject,  # Fallback to code
+                "question_count": question_count,
+                "available_years": sorted(years, reverse=True),
+            })
+        
+        logger.info(
+            f"Listed {len(subject_list)} subjects from canonical_questions",
+            extra={"trace_id": trace_id, "num_subjects": len(subject_list)}
+        )
+        
+        return subject_list
     
     def _generate_structure_hash(
         self,
@@ -389,7 +457,7 @@ class ExamStructureEngine:
         school_id: Optional[str],
         trace_id: str,
         limit: int = 10,
-        candidate_timezone: str = "Africa/Harare",  # NEW: Timezone parameter
+        candidate_timezone: str = "Africa/Harare",
     ) -> list[Dict[str, Any]]:
         """Fetch upcoming scheduled exams for a candidate.
         
@@ -405,7 +473,7 @@ class ExamStructureEngine:
             List of formatted upcoming exam objects with timezone conversion
         """
         try:
-            # Import  timezone utilities
+            # Import timezone utilities
             from app.utils.timezone_helper import format_exam_time, get_time_until_exam
             
             schedules = await self.schedule_repo.get_upcoming_exams(
@@ -430,8 +498,8 @@ class ExamStructureEngine:
                     "exam_id": schedule.get("exam_id"),
                     "subject": schedule.get("subject_name"),
                     "paper": schedule.get("paper_name"),
-                    "scheduled_date": time_info,  # Now includes UTC, local, timezone, display
-                    "time_remaining": time_remaining,  # Days, hours, urgency level
+                    "scheduled_date": time_info,
+                    "time_remaining": time_remaining,
                     "duration_minutes": schedule.get("duration_minutes"),
                     "status": schedule.get("status"),
                 })
@@ -476,9 +544,6 @@ class ExamStructureEngine:
         Returns:
             EngineResponse with only upcoming_exams field
         """
-        # Create minimal output with just upcoming exams
-        # This is used when the dashboard pipeline calls exam_structure
-        # but doesn't need actual exam structure data
         output_data = {
             "upcoming_exams": upcoming_exams
         }
@@ -497,7 +562,6 @@ class ExamStructureEngine:
             error=None,
             trace=trace,
         )
-
     
     def _build_response(
         self,

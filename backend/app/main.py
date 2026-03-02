@@ -42,6 +42,9 @@ from app.api.endpoints.handwriting_endpoints import router as handwriting_router
 from app.api.endpoints.practice_endpoints import router as practice_router
 from app.api.endpoints.external_api import router as external_router  # Phase 5
 from app.api.v1.resilience import router as resilience_router  # Phase 6
+from app.api.endpoints.jobs_endpoints import router as jobs_router
+from app.core.background import job_manager
+
 
 
 # Configure logging
@@ -137,6 +140,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager - startup and shutdown hooks.
     
     STARTUP:
+    - Verify database connection and configuration (FAIL-FAST)
     - Validate engine registry completeness (FAIL-FAST)
     - Validate pipeline definitions
     - Log system readiness
@@ -150,6 +154,16 @@ async def lifespan(app: FastAPI):
     logger.info("=" * 80)
     
     try:
+        # CRITICAL: Verify database connection FIRST
+        logger.info("Verifying database connection and configuration...")
+        from app.config.database import verify_database_connection
+        db_verification = verify_database_connection()
+        logger.info(f"✓ Database verification PASSED:")
+        logger.info(f"  • Database: {db_verification['database']}")
+        logger.info(f"  • Collections: {len(db_verification['collections'])}")
+        for col_name, count in db_verification['collection_stats'].items():
+            logger.info(f"    - {col_name}: {count:,} documents")
+        
         # CRITICAL: Validate engine registry completeness
         logger.info("Validating engine registry...")
         validate_engine_registry_completeness()
@@ -157,6 +171,10 @@ async def lifespan(app: FastAPI):
         # Validate pipeline definitions
         logger.info("Validating pipeline definitions...")
         validate_pipeline_definitions()
+        
+        # Initialize Background Job Manager
+        logger.info("Initializing background job manager...")
+        job_manager.initialize()
         
         # Log orchestrator status
         logger.info(
@@ -182,6 +200,7 @@ async def lifespan(app: FastAPI):
     
     # SHUTDOWN
     logger.info("Shutting down ZimPrep Backend...")
+    job_manager.shutdown()
 
 
 # Create FastAPI application
@@ -310,6 +329,10 @@ app.include_router(handwriting_router)
 app.include_router(practice_router)
 app.include_router(external_router)  # Phase 5: External API endpoints
 app.include_router(resilience_router)  # Phase 6: Mobile & Low-Connectivity Resilience
+
+from app.api.endpoints.jobs_endpoints import router as jobs_router
+app.include_router(jobs_router)  # Phase 3: Background Jobs
+
 
 
 # Root endpoint

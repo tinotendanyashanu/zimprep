@@ -1,0 +1,8 @@
+﻿{
+  "detail": {
+    "trace_id": "386493c9-7dc0-4341-9aca-36309e695445",
+    "error": "Engine 'exam_structure' failed: MongoDB client not initialized",
+    "pipeline_name": "exam_attempt_v1",
+    "failed_engine": "exam_structure"
+  }
+}

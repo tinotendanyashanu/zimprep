@@ -13,6 +13,15 @@ import logging
 from typing import Literal
 from pydantic import field_validator, ValidationError
 from pydantic_settings import BaseSettings
+import os
+from dotenv import load_dotenv
+
+# Force load .env
+load_dotenv()
+print(f"DEBUG: Loading settings. CWD={os.getcwd()}")
+print(f"DEBUG: MONGODB_URI env var: {os.getenv('MONGODB_URI')}")
+
+
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +50,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///:memory:"
     
     # MongoDB connection string (REQUIRED in production)
-    MONGODB_URI: str = "mongodb://zimprep:zimprep@localhost:27017/zimprep?authSource=admin"
+    MONGODB_URI: str = "mongodb+srv://zimsec:PPGKfInJTGqA9pD7@cluster0.qlnn5na.mongodb.net"
+    
+    # MongoDB database name (REQUIRED)
+    MONGODB_DB: str = "zimprep_ingestion"
     
     # Redis for caching and rate limiting
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -116,6 +128,17 @@ class Settings(BaseSettings):
             logger.warning(
                 "MongoDB URI contains 'localhost' in production/staging - "
                 "ensure this is intentional"
+            )
+        return v
+    
+    @field_validator("MONGODB_DB")
+    @classmethod
+    def validate_mongodb_db(cls, v: str, info) -> str:
+        """Ensure MongoDB database name is configured."""
+        env = info.data.get("ENV", "development")
+        if env in ["production", "staging", "development"] and not v:
+            raise ValueError(
+                "MONGODB_DB is required - must explicitly specify database name"
             )
         return v
     

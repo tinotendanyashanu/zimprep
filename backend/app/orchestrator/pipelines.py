@@ -232,10 +232,7 @@ PIPELINES: dict[PipelineName, list[str]] = {
         "mastery_modeling",
         
         # Step 6: Generate enhanced recommendations (extends existing engine)
-        "recommendation",
-        
-        # Step 7: Log analytics execution in audit trail
-        "audit_compliance"
+        "recommendation"
     ],
     
     # PHASE FOUR: INSTITUTIONAL ANALYTICS PIPELINE

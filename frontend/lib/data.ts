@@ -88,6 +88,20 @@ export const MOCK_PAPERS: Record<string, Paper[]> = {
   ]
 };
 
+export const MOCK_TOPICS: Record<string, string[]> = {
+    default: ["General Knowledge", "Core Concepts", "Advanced Theory", "Practical Applications" ],
+    "Mathematics": ["Algebra", "Geometry", "Calculus", "Probability & Statistics", "Trigonometry", "Matrices", "Vectors"],
+    "Physics": ["Mechanics", "Electricity & Magnetism", "Waves", "Thermal Physics", "Atomic Physics"],
+    "Chemistry": ["Atomic Structure", "Chemical Bonding", "Stoichiometry", "Organic Chemistry", "Acids & Bases"],
+    "History": ["World War I", "World War II", "Decolonisation of Africa", "The Cold War", "League of Nations"],
+    "Combined Science": ["Biology: Cells", "Physics: Energy", "Chemistry: Matter", "Biology: Reproduction", "Chemistry: Industrial Processes"]
+};
+
+
 export function getPapersForSubject(subject: string): Paper[] {
   return MOCK_PAPERS[subject] || MOCK_PAPERS["default"];
+}
+
+export function getTopicsForSubject(subject: string): string[] {
+    return MOCK_TOPICS[subject] || MOCK_TOPICS["default"];
 }

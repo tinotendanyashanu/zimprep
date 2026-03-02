@@ -54,17 +54,15 @@ class PracticeAssemblyEngine:
     7. Build and return practice session
     """
     
-    def __init__(self, mongodb_client=None, orchestrator=None):
+    def __init__(self, mongodb_client=None):
         """Initialize engine with services.
         
         Args:
             mongodb_client: MongoDB client for question queries (optional)
-            orchestrator: Orchestrator instance for Topic Intelligence calls (optional)
         """
         self.question_selector = QuestionSelector(mongodb_client)
         self.difficulty_balancer = DifficultyBalancer()
         self.session_builder = SessionBuilder()
-        self.orchestrator = orchestrator
     
     async def run(
         self,
@@ -73,7 +71,7 @@ class PracticeAssemblyEngine:
     ) -> EngineResponse:
         """Execute practice assembly engine.
         
-        Implements the mandatory 7-step execution flow.
+        Implements the mandatory measurement-driven flow.
         
         Args:
             payload: Input data (validated against PracticeAssemblyInput)
@@ -99,44 +97,17 @@ class PracticeAssemblyEngine:
                 logger.error(f"[{trace_id}] {error_msg}")
                 return self._build_error_response(error_msg, trace_id, start_time)
             
-            # Step 2: Expand topics using Topic Intelligence (if enabled)
+            # Step 2: Input Pre-processing
+            # Note: Topic Expansion MUST be done by the orchestrator pipeline BEFORE calling this engine.
+            # This engine strictly assembles based on the provided inputs.
             all_topics = engine_input.primary_topic_ids.copy()
             related_topics_added = []
             
-            if engine_input.include_related_topics and self.orchestrator:
-                logger.info(f"[{trace_id}] Expanding topics via Topic Intelligence")
-                
-                for topic_id in engine_input.primary_topic_ids:
-                    try:
-                        # Call Topic Intelligence Engine via orchestrator
-                        # (In production, this would be an actual orchestrator call)
-                        # related_result = await self.orchestrator.execute_engine(
-                        #     engine_name="topic_intelligence",
-                        #     payload={
-                        #         "operation": "find_similar",
-                        #         "query_topic_id": topic_id,
-                        #         "similarity_threshold": engine_input.similarity_threshold,
-                        #         "max_results": 3,
-                        #     },
-                        #     context=context
-                        # )
-                        # related_topics = [
-                        #     t["topic_id"]
-                        #     for t in related_result.data.get("similar_topics", [])
-                        # ]
-                        
-                        # Placeholder: simulated topic expansion
-                        related_topics = []  # Would come from Topic Intelligence
-                        
-                        all_topics.extend(related_topics)
-                        related_topics_added.extend(related_topics)
-                        
-                    except Exception as e:
-                        logger.warning(
-                            f"[{trace_id}] Topic expansion failed for {topic_id}: {str(e)}"
-                        )
-                        # Continue without expansion (graceful degradation)
-            
+            if engine_input.include_related_topics:
+                 # In a future phase, if `related_topics` are passed in the payload, we would add them here.
+                 # For now, we strictly use the primary topics to ensure isolation.
+                 logger.info(f"[{trace_id}] 'include_related_topics' is True, but internal expansion is disabled for isolation.")
+
             logger.info(f"[{trace_id}] Using topics: {all_topics}")
             
             # Step 3: Query available questions
@@ -152,6 +123,16 @@ class PracticeAssemblyEngine:
             )
             
             logger.info(f"[{trace_id}] Found {len(available_questions)} available questions")
+            
+            # FAIL-FAST: Ensure questions were retrieved from canonical_questions
+            if len(available_questions) == 0:
+                error_msg = (
+                    f"No questions available for practice session. "
+                    f"Subject: {engine_input.subject}, Level: {engine_input.syllabus_version}, "
+                    f"Topics: {all_topics}. Verify canonical_questions collection has data."
+                )
+                logger.error(f"[{trace_id}] {error_msg}")
+                return self._build_error_response(error_msg, trace_id, start_time)
             
             # Step 4: Balance difficulty distribution
             logger.info(f"[{trace_id}] Balancing difficulty...")

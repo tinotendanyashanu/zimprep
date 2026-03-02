@@ -77,8 +77,8 @@ def register_all_engines():
     print("  ✅ recommendation")
     
     # Engine 11: Audit & Compliance
-    from app.engines.audit_compliance.engine import AuditEngine
-    engine_registry.register("audit", AuditEngine())
+    from app.engines.audit_compliance.engine import AuditComplianceEngine
+    engine_registry.register("audit", AuditComplianceEngine())
     print("  ✅ audit")
     
     print("✅ All 11 engines registered successfully!\n")
@@ -352,4 +352,5 @@ async def main():
 
 if __name__ == "__main__":
     exit_code = asyncio.run(main())
-    sys.exit(exit_code)
+    if exit_code != 0:
+        raise RuntimeError(f"Phase B1 failed with exit code {exit_code}.")

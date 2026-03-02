@@ -6,7 +6,8 @@ import { getUser } from '../auth';
 interface ExamState {
   paper: ExamPaper | null;
   currentQuestionIndex: number;
-  answers: Record<string, string>; // questionId -> answer
+  answers: Record<string, string>; // questionId -> answer (text)
+  attachments: Record<string, string[]>; // questionId -> Base64/URLs
   timeLeft: number; // in seconds
   status: 'idle' | 'running' | 'paused' | 'submitted';
   isSubmitting: boolean;
@@ -16,6 +17,8 @@ interface ExamState {
   // Actions
   initializeExam: (paper: ExamPaper) => void;
   setAnswer: (questionId: string, answer: string) => void;
+  addAttachment: (questionId: string, fileData: string) => void;
+  removeAttachment: (questionId: string, index: number) => void;
   nextQuestion: () => void;
   prevQuestion: () => void;
   jumpToQuestion: (index: number) => void;
@@ -27,6 +30,7 @@ export const useExamStore = create<ExamState>((set, get) => ({
   paper: null,
   currentQuestionIndex: 0,
   answers: {},
+  attachments: {},
   timeLeft: 0,
   status: 'idle',
   isSubmitting: false,
@@ -37,6 +41,7 @@ export const useExamStore = create<ExamState>((set, get) => ({
     paper,
     currentQuestionIndex: 0,
     answers: {},
+    attachments: {},
     timeLeft: paper.durationMinutes * 60,
     status: 'running',
     submitError: null,
@@ -46,6 +51,21 @@ export const useExamStore = create<ExamState>((set, get) => ({
   setAnswer: (questionId, answer) => set((state) => ({
     answers: { ...state.answers, [questionId]: answer }
   })),
+
+  addAttachment: (questionId, fileData) => set((state) => {
+    const current = state.attachments[questionId] || [];
+    return {
+        attachments: { ...state.attachments, [questionId]: [...current, fileData] }
+    };
+  }),
+
+  removeAttachment: (questionId, index) => set((state) => {
+    const current = state.attachments[questionId] || [];
+    const updated = current.filter((_, i) => i !== index);
+    return {
+        attachments: { ...state.attachments, [questionId]: updated }
+    };
+  }),
 
   nextQuestion: () => set((state) => {
     if (!state.paper) return state;
@@ -108,6 +128,7 @@ export const useExamStore = create<ExamState>((set, get) => ({
         answers: Object.entries(state.answers).map(([questionId, answer]) => ({
           question_id: questionId,
           student_answer: answer,
+          attachments: state.attachments[questionId] || [], // Send attachments
           submitted_at: new Date().toISOString(),
         })),
         submitted_at: new Date().toISOString(),

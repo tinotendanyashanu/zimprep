@@ -61,7 +61,7 @@ try:
     print("  ✅")
     
     print("  - audit...")
-    from app.engines.audit_compliance.engine import AuditEngine
+    from app.engines.audit_compliance.engine import AuditComplianceEngine
     print("  ✅")
     
     print("\n✅ All imports successful!")
@@ -70,4 +70,4 @@ except Exception as e:
     print(f"\n❌ Error: {e}")
     import traceback
     traceback.print_exc()
-    sys.exit(1)
+    raise

@@ -145,10 +145,11 @@ def test_execution_context_fields(execution_context):
     assert execution_context.feature_flags_snapshot == {"test_flag": True}
 
 
-def test_pipeline_not_found(execution_context):
+@pytest.mark.asyncio
+async def test_pipeline_not_found(execution_context):
     """Test error handling for non-existent pipeline."""
     with pytest.raises(PipelineExecutionError) as exc_info:
-        orchestrator.execute_pipeline(
+        await orchestrator.execute_pipeline(
             pipeline_name="non_existent_pipeline",
             payload={},
             context=execution_context

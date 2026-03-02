@@ -17,7 +17,7 @@ from pymongo import MongoClient
 from pydantic import ValidationError
 
 from app.orchestrator.execution_context import ExecutionContext
-from app.orchestrator.engine_response import EngineResponse
+from app.contracts.engine_response import EngineResponse
 from app.engines.learning_analytics.schemas.input import LearningAnalyticsInput
 from app.engines.learning_analytics.schemas.output import (
     LearningAnalyticsOutput,

@@ -18,7 +18,7 @@ import uuid
 from pymongo import MongoClient
 
 from app.orchestrator.execution_context import ExecutionContext
-from app.orchestrator.engine_response import EngineResponse
+from app.contracts.engine_response import EngineResponse
 
 from app.engines.governance_reporting.schemas.input import (
     GovernanceReportingInput,

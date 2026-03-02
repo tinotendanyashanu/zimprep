@@ -17,7 +17,7 @@ from typing import Optional
 from pymongo import MongoClient
 
 from app.orchestrator.execution_context import ExecutionContext
-from app.orchestrator.engine_response import EngineResponse
+from app.contracts.engine_response import EngineResponse
 
 from app.engines.institutional_analytics.schemas.input import InstitutionalAnalyticsInput
 from app.engines.institutional_analytics.schemas.output import InstitutionalAnalyticsOutput

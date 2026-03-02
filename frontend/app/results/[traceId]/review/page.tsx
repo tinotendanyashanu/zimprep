@@ -9,8 +9,8 @@ import { ArrowLeft, BookOpen, Target } from "lucide-react";
 import { MOCK_FEEDBACK_DATA, MOCK_IMPROVEMENT_SIGNALS } from "@/lib/results/types";
 import { QuestionFeedbackItem } from "@/components/results/question-feedback-item";
 
-export default function ReviewPage({ params }: { params: Promise<{ attemptId: string }> }) {
-  const { attemptId } = use(params);
+export default function ReviewPage({ params }: { params: Promise<{ traceId: string }> }) {
+  const { traceId } = use(params);
   
   // mock data fetch
   const questions = MOCK_FEEDBACK_DATA;
@@ -21,7 +21,7 @@ export default function ReviewPage({ params }: { params: Promise<{ attemptId: st
       {/* Header */}
       <header className="border-b border-zinc-200 bg-white sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-6 h-16 flex items-center justify-between">
-          <Link href={`/results/${attemptId}`} className="flex items-center gap-2 text-zinc-600 hover:text-zinc-900 transition-colors">
+          <Link href={`/results/${traceId}`} className="flex items-center gap-2 text-zinc-600 hover:text-zinc-900 transition-colors">
              <ArrowLeft className="w-4 h-4" />
              <span className="text-sm font-medium">Back to Result Summary</span>
           </Link>

@@ -87,3 +87,30 @@ class DatabaseError(ExamStructureException):
     Engine fails closed - no fallbacks or defaults.
     """
     pass
+
+
+class NoSubjectsFoundError(ExamStructureException):
+    """No subjects found in canonical_questions collection.
+    
+    Raised when canonical_questions.distinct("subject") returns empty.
+    This indicates no ingestion data is available.
+    """
+    pass
+
+
+class NoPapersFoundError(ExamStructureException):
+    """No papers found for the selected subject and year.
+    
+    Raised when no questions exist for the requested (subject, year) combination.
+    """
+    pass
+
+
+class NoQuestionsFoundError(ExamStructureException):
+    """No questions found for the selected paper.
+    
+    Raised when no questions exist for the requested (subject, year, paper) combination.
+    This prevents exam attempts with empty question sets.
+    """
+    pass
+

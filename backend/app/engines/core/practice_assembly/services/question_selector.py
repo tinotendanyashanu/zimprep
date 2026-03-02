@@ -5,8 +5,10 @@ Selects questions from MongoDB based on topics, filters, and recency.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Literal
+from typing import List, Set, Optional
 
+from app.config.database import get_database
+from app.config.knowledge_contract import CANONICAL_QUESTIONS
 from app.engines.core.practice_assembly.schemas.session import QuestionItem
 from app.engines.core.practice_assembly.errors import InsufficientQuestionsError
 
@@ -27,9 +29,22 @@ class QuestionSelector:
         """Initialize selector with MongoDB client.
         
         Args:
-            mongodb_client: MongoDB client (optional, uses sample data if None)
+            mongodb_client: MongoDB client (optional, uses shared DB if None)
         """
         self.mongodb_client = mongodb_client
+        self.db = None
+    
+    def _get_db(self):
+        """Get database handle."""
+        if self.db is None:
+            if self.mongodb_client:
+                # For testing with injected client
+                from app.config.settings import settings
+                self.db = self.mongodb_client[settings.MONGODB_DB]
+            else:
+                # Use shared database
+                self.db = get_database()
+        return self.db
     
     async def select_questions(
         self,
@@ -65,21 +80,131 @@ class QuestionSelector:
             user_id, exclude_recent_days, trace_id
         )
         
-        # Query MongoDB (placeholder)
-        # In production, would query:
-        # - questions collection
-        # - filter by topic_ids, subject, syllabus_version
-        # - exclude recent_question_ids
-        # - filter by preferred_question_types if specified
+        # Query canonical_questions collection
+        db = self._get_db()
+        collection = db[CANONICAL_QUESTIONS]
         
-        # For now, return sample questions
-        questions = self._get_sample_questions(
-            topic_ids, subject, recent_question_ids, preferred_question_types
-        )
+        # Build query filter
+        query_filter = {
+            "subject": subject,
+            "level": syllabus_version,
+        }
         
-        logger.info(f"[{trace_id}] Found {len(questions)} questions")
+        # Exclude recently attempted questions
+        if recent_question_ids:
+            query_filter["canonical_question_id"] = {"$nin": list(recent_question_ids)}
+        
+        logger.info(f"[{trace_id}] Querying {CANONICAL_QUESTIONS} with filter: {query_filter}")
+        
+        # Execute query
+        cursor = collection.find(query_filter).limit(100)
+        raw_questions = list(cursor)
+        
+        logger.info(f"[{trace_id}] Found {len(raw_questions)} questions from database")
+        
+        # Map to QuestionItem schema
+        questions = []
+        for idx, q in enumerate(raw_questions):
+            try:
+                question_item = self._map_to_question_item(q, idx, topic_ids)
+                
+                # Filter by preferred types if specified
+                if preferred_question_types and question_item.question_type not in preferred_question_types:
+                    continue
+                
+                questions.append(question_item)
+            except Exception as e:
+                logger.warning(
+                    f"[{trace_id}] Failed to map question {q.get('canonical_question_id')}: {e}"
+                )
+                continue
+        
+        logger.info(f"[{trace_id}] Mapped {len(questions)} questions successfully")
+        
+        # FAIL-FAST: Ensure we have questions from canonical_questions
+        if len(questions) == 0:
+            error_msg = (
+                f"No questions found in {CANONICAL_QUESTIONS} collection for "
+                f"subject={subject}, level={syllabus_version}. "
+                f"Verify ingestion data exists."
+            )
+            logger.error(f"[{trace_id}] {error_msg}")
+            raise InsufficientQuestionsError(
+                message=error_msg,
+                trace_id=trace_id,
+                metadata={
+                    "subject": subject,
+                    "syllabus_version": syllabus_version,
+                    "topic_ids": topic_ids,
+                }
+            )
         
         return questions
+    
+    def _map_to_question_item(
+        self,
+        raw_question: dict,
+        index: int,
+        topic_ids: List[str]
+    ) -> QuestionItem:
+        """Map ingestion schema to QuestionItem schema.
+        
+        Ingestion schema:
+        - canonical_question_id: str
+        - text: str
+        - subject: str
+        - level: str
+        - has_graph: bool
+        - graph_refs: list[str]
+        - marking_scheme: dict (optional)
+        
+        Runtime schema:
+        - question_id: str
+        - question_text: str
+        - question_type: str
+        - topic_id: str
+        - topic_name: str
+        - difficulty: str
+        - max_marks: int
+        - estimated_minutes: int
+        """
+        question_id = raw_question.get("canonical_question_id", str(raw_question.get("_id")))
+        question_text = raw_question.get("text", "")
+        
+        # Infer question type from metadata or default
+        has_graph = raw_question.get("has_graph", False)
+        question_type = "graph" if has_graph else "calculation"
+        
+        # Extract marks from marking scheme if available
+        marking_scheme = raw_question.get("marking_scheme", {})
+        max_marks = marking_scheme.get("total_marks", 5)
+        
+        # Estimate difficulty and time based on marks
+        if max_marks <= 2:
+            difficulty = "easy"
+            estimated_minutes = 3
+        elif max_marks <= 5:
+            difficulty = "medium"
+            estimated_minutes = 8
+        else:
+            difficulty = "hard"
+            estimated_minutes = 15
+        
+        # Use first topic_id or derive from metadata
+        topic_id = topic_ids[0] if topic_ids else raw_question.get("topic_id", "unknown")
+        topic_name = raw_question.get("topic", raw_question.get("subject", "General"))
+        
+        return QuestionItem(
+            question_id=question_id,
+            question_text=question_text,
+            question_type=question_type,
+            topic_id=topic_id,
+            topic_name=topic_name,
+            difficulty=difficulty,
+            max_marks=max_marks,
+            estimated_minutes=estimated_minutes,
+            order_index=index
+        )
     
     async def _get_recent_questions(
         self,
@@ -100,110 +225,7 @@ class QuestionSelector:
         if days == 0:
             return set()
         
-        # Placeholder: In production, would query user_question_history
-        # cutoff_date = datetime.utcnow() - timedelta(days=days)
-        # recent = await self.mongodb_client.user_question_history.find({
-        #     "user_id": user_id,
-        #     "attempted_at": {"$gte": cutoff_date}
-        # }).to_list(1000)
-        # return {r["question_id"] for r in recent}
-        
-        logger.debug(f"[{trace_id}] Excluding questions from last {days} days")
-        return set()  # Placeholder
-    
-    def _get_sample_questions(
-        self,
-        topic_ids: list[str],
-        subject: str,
-        exclude_ids: set[str],
-        preferred_types: list[str] | None
-    ) -> list[QuestionItem]:
-        """Get sample questions (placeholder for MongoDB query).
-        
-        In production, this would be replaced with actual MongoDB query.
-        """
-        # Sample questions for demonstration
-        sample_questions = [
-            # Easy questions
-            QuestionItem(
-                question_id="q001",
-                question_text="Solve for x: 2x + 3 = 7",
-                question_type="calculation",
-                topic_id=topic_ids[0] if topic_ids else "topic_001",
-                topic_name="Algebra",
-                difficulty="easy",
-                max_marks=2,
-                estimated_minutes=3,
-                order_index=0
-            ),
-            QuestionItem(
-                question_id="q002",
-                question_text="What is the value of π (pi)?",
-                question_type="multiple_choice",
-                topic_id=topic_ids[0] if topic_ids else "topic_001",
-                topic_name="Algebra",
-                difficulty="easy",
-                max_marks=1,
-                estimated_minutes=2,
-                order_index=1
-            ),
-            # Medium questions
-            QuestionItem(
-                question_id="q003",
-                question_text="Solve the quadratic equation: x² + 5x + 6 = 0",
-                question_type="calculation",
-                topic_id=topic_ids[0] if topic_ids else "topic_002",
-                topic_name="Quadratic Equations",
-                difficulty="medium",
-                max_marks=5,
-                estimated_minutes=8,
-                order_index=2
-            ),
-            QuestionItem(
-                question_id="q004",
-                question_text="Factorize: x² - 9",
-                question_type="calculation",
-                topic_id=topic_ids[0] if topic_ids else "topic_001",
-                topic_name="Algebra",
-                difficulty="medium",
-                max_marks=3,
-                estimated_minutes=5,
-                order_index=3
-            ),
-            # Hard questions
-            QuestionItem(
-                question_id="q005",
-                question_text="Prove that √2 is irrational",
-                question_type="essay",
-                topic_id=topic_ids[0] if topic_ids else "topic_003",
-                topic_name="Number Theory",
-                difficulty="hard",
-                max_marks=10,
-                estimated_minutes=15,
-                order_index=4
-            ),
-        ]
-        
-        # Filter by preferred types
-        if preferred_types:
-            sample_questions = [
-                q for q in sample_questions
-                if q.question_type in preferred_types
-            ]
-        
-        # Filter by exclude_ids
-        sample_questions = [
-            q for q in sample_questions
-            if q.question_id not in exclude_ids
-        ]
-        
-        # Duplicate to have more questions
-        # In production, MongoDB would return many questions
-        extended_questions = []
-        for i in range(5):  # Create 5x duplicates
-            for q in sample_questions:
-                q_copy = q.model_copy()
-                q_copy.question_id = f"{q.question_id}_v{i}"
-                extended_questions.append(q_copy)
-        
-        return extended_questions
+        # TODO: Query user_question_history or submissions collection
+        # For now, return empty set (no recency filtering)
+        logger.debug(f"[{trace_id}] Recency filtering not yet implemented")
+        return set()

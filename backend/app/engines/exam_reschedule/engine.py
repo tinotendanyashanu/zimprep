@@ -10,8 +10,9 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from app.core.base_engine import BaseEngine
-from app.orchestrator.engine_response import EngineResponse, EngineTrace
+# from app.core.base_engine import BaseEngine
+from app.contracts.engine_response import EngineResponse
+from app.contracts.trace import EngineTrace
 from app.orchestrator.execution_context import ExecutionContext
 
 logger = logging.getLogger(__name__)
@@ -45,7 +46,7 @@ class RescheduleApprovalInput(BaseModel):
     notes: Optional[str] = None
 
 
-class ExamRescheduleEngine(BaseEngine):
+class ExamRescheduleEngine:
     """Engine for managing exam reschedule requests."""
     
     def __init__(self, mongo_client=None):

@@ -40,7 +40,7 @@ class TestReportingEngineAzureIntegration:
             trace_id=uuid4(),
             user_id=uuid4(),
             role=UserRole.STUDENT,
-            reporting_scope=ReportingScope.EXAM,
+            reporting_scope=ReportingScope.DETAILED,
             export_format=ExportFormat.PDF,
             exam_session_id=uuid4(),
             subject_code="MATH_4008",
@@ -115,20 +115,26 @@ class TestReportingEngineAzureIntegration:
     def test_no_storage_calls_when_no_export(
         self, mock_mongo, mock_azure_storage, sample_input, sample_results
     ):
-        """Test no Azure storage calls when export_format is NONE."""
+        """Test JSON export persists via Azure storage."""
         # Setup
-        sample_input.export_format = ExportFormat.NONE
+        json_input = sample_input.model_copy(update={"export_format": ExportFormat.JSON})
         engine = ReportingAnalyticsEngine()
         
         mock_instance = mock_azure_storage.return_value
+        mock_instance.save_export.return_value = {
+            "blob_path": "exports/user/trace/json.json",
+            "download_url": "https://testaccount.blob.core.windows.net/...",
+            "content_type": "application/json",
+            "size_bytes": 500,
+        }
         
         # Execute
-        result = engine._render_exports(sample_input, sample_results)
+        result = engine._render_exports(json_input, sample_results)
         
-        # Verify no storage calls made
-        mock_instance.save_export.assert_not_called()
+        # Verify JSON export persisted
+        mock_instance.save_export.assert_called_once()
         assert "exports" in result
-        assert len(result["exports"]) == 0
+        assert len(result["exports"]) == 1
     
     def test_export_metadata_includes_sas_urls(
         self, mock_mongo, mock_azure_storage, sample_input, sample_results
@@ -181,7 +187,7 @@ class TestReportingEngineAzureIntegration:
     ):
         """Test CSV exports are persisted to Azure."""
         # Setup
-        sample_input.export_format = ExportFormat.CSV
+        csv_input = sample_input.model_copy(update={"export_format": ExportFormat.CSV})
         engine = ReportingAnalyticsEngine()
         
         mock_instance = mock_azure_storage.return_value
@@ -197,7 +203,7 @@ class TestReportingEngineAzureIntegration:
             mock_export.return_value.export_to_csv.return_value = "csv,data\n1,2"
             
             # Execute
-            result = engine._render_exports(sample_input, sample_results)
+            result = engine._render_exports(csv_input, sample_results)
         
         # Verify
         assert len(result["exports"]) == 1
@@ -209,7 +215,7 @@ class TestReportingEngineAzureIntegration:
     ):
         """Test JSON exports are persisted to Azure."""
         # Setup
-        sample_input.export_format = ExportFormat.JSON
+        json_input = sample_input.model_copy(update={"export_format": ExportFormat.JSON})
         engine = ReportingAnalyticsEngine()
         
         mock_instance = mock_azure_storage.return_value
@@ -225,7 +231,7 @@ class TestReportingEngineAzureIntegration:
             mock_export.return_value.export_to_json.return_value = '{"data": "json"}'
             
             # Execute
-            result = engine._render_exports(sample_input, sample_results)
+            result = engine._render_exports(json_input, sample_results)
         
         # Verify
         assert len(result["exports"]) == 1

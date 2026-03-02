@@ -9,6 +9,7 @@ Tests complete flow:
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from datetime import datetime
+from types import SimpleNamespace
 
 from app.engines.ai.reasoning_marking.services.cached_reasoning_service import CachedReasoningService
 from app.engines.ai.reasoning_marking.schemas.input import RubricPoint, RetrievedEvidence, AnswerType
@@ -24,7 +25,13 @@ def mock_openai_client():
     mock_response.choices[0].message.content = '''
     {
         "awarded_points": [
-            {"point_id": "p1", "reason": "Student correctly identified photosynthesis", "marks": 2.0}
+            {
+                "point_id": "p1",
+                "evidence_id": "ev001",
+                "evidence_excerpt": "Photosynthesis definition from marking scheme",
+                "reason": "Student correctly identified photosynthesis",
+                "marks": 2.0
+            }
         ],
         "missing_points": []
     }
@@ -38,25 +45,16 @@ def mock_openai_client():
 def mock_redis():
     """Mock Redis client."""
     mock_client = AsyncMock()
-    # First call: miss, second call: hit
-    call_count = [0]
-    
+    cache_store = {}
+
     async def mock_get(key):
-        call_count[0] += 1
-        if call_count[0] == 1:
-            return None  # First attempt: cache miss
-        else:
-            # Second attempt: cache hit
-            import json
-            return json.dumps({
-                "awarded_points": [
-                    {"point_id": "p1", "reason": "Student correctly identified photosynthesis", "marks": 2.0}
-                ],
-                "missing_points": []
-            })
-    
+        return cache_store.get(key)
+
+    async def mock_setex(key, ttl, value):
+        cache_store[key] = value
+
     mock_client.get = mock_get
-    mock_client.setex = AsyncMock()
+    mock_client.setex = AsyncMock(side_effect=mock_setex)
     return mock_client
 
 
@@ -94,6 +92,54 @@ def cached_reasoning_service(mock_redis, mock_mongodb, mock_openai_client):
     )
     # Inject mocked OpenAI client
     service.client = mock_openai_client
+
+    # Override reasoning to return JSON-serializable output
+    def _mock_perform_reasoning(
+        student_answer,
+        rubric_points,
+        retrieved_evidence,
+        answer_type,
+        subject,
+        question_id,
+        trace_id
+    ):
+        return {
+            "awarded_points": [
+                {
+                    "point_id": "p1",
+                    "evidence_id": "ev001",
+                    "evidence_excerpt": "Photosynthesis definition from marking scheme",
+                    "reason": "Student correctly identified photosynthesis",
+                    "marks": 2.0
+                }
+            ],
+            "missing_points": []
+        }
+
+    service.perform_reasoning = _mock_perform_reasoning
+
+    # Ensure cache lookup returns cached_data for cache hits
+    async def _mock_lookup(cache_key, trace_id):
+        import json
+        cached_value = await mock_redis.get(f"ai_cache:{cache_key}")
+        if cached_value:
+            parsed = json.loads(cached_value)
+            return SimpleNamespace(
+                cache_hit=True,
+                cache_key=cache_key,
+                cached_at=parsed.get("cached_at"),
+                cache_source="redis",
+                cached_data=parsed.get("result")
+            )
+        return SimpleNamespace(
+            cache_hit=False,
+            cache_key=cache_key,
+            cached_at=None,
+            cache_source="none",
+            cached_data=None
+        )
+
+    service.cache_service.lookup = _mock_lookup
     return service
 
 

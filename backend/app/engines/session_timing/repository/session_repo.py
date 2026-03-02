@@ -31,17 +31,20 @@ class SessionRepository:
         Args:
             mongo_client: MongoDB client instance (optional, for testing)
         """
-        # TODO: Initialize from config/environment
+        # Use shared database configuration
         if mongo_client is None:
-            # Default connection (will be replaced with proper config)
-            mongo_client = MongoClient("mongodb://localhost:27017/")
-        
-        self.client = mongo_client
-        self.db = self.client["zimprep"]
-        self.collection = self.db["sessions"]
+            from app.config.database import get_mongo_client, get_database
+            self.client = get_mongo_client()
+            self.db = get_database()
+        else:
+            self.client = mongo_client
+            self.db = self.client["zimprep"]
+            
+        self.collection = self.db["exam_sessions"]
         
         # Ensure indexes exist
-        self._ensure_indexes()
+        # NOTE: Commented out to prevent database connection during module import
+        # self._ensure_indexes()
     
     def _ensure_indexes(self) -> None:
         """Create required indexes for performance."""

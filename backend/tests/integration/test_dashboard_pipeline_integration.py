@@ -10,8 +10,70 @@ from datetime import datetime, timedelta
 from pymongo import MongoClient
 
 from app.config.settings import settings
+from app.contracts.engine_response import EngineResponse
+from app.contracts.trace import EngineTrace
 from app.orchestrator.orchestrator import Orchestrator
+from app.orchestrator.engine_registry import engine_registry
 from app.orchestrator.execution_context import ExecutionContext
+
+
+class StubEngine:
+    """Minimal stub engine for pipeline integration tests."""
+
+    def __init__(self, engine_name: str, engine_version: str = "test"):
+        self.engine_name = engine_name
+        self.engine_version = engine_version
+
+    def run(self, payload, context):
+        trace = EngineTrace(
+            trace_id=context.trace_id,
+            engine_name=self.engine_name,
+            engine_version=self.engine_version,
+            timestamp=datetime.utcnow(),
+            confidence=1.0,
+        )
+        return EngineResponse(success=True, data={}, error=None, trace=trace)
+
+
+@pytest.fixture(autouse=True)
+def stub_pipeline_engines():
+    """Stub engines that are out of scope for these tests."""
+    original_reporting = engine_registry.get("reporting")
+    original_recommendation = engine_registry.get("recommendation")
+    original_identity = engine_registry.get("identity_subscription")
+
+    engine_registry.register("reporting", StubEngine("reporting"))
+    engine_registry.register("recommendation", StubEngine("recommendation"))
+    engine_registry.register("identity_subscription", StubEngine("identity_subscription"))
+
+    yield
+
+    if original_reporting:
+        engine_registry.register("reporting", original_reporting)
+    if original_recommendation:
+        engine_registry.register("recommendation", original_recommendation)
+    if original_identity:
+        engine_registry.register("identity_subscription", original_identity)
+
+
+@pytest.fixture(autouse=True)
+def stable_exam_time_format(monkeypatch):
+    """Avoid platform-specific strftime failures during tests."""
+    from app.utils import timezone_helper
+
+    def _safe_format_exam_time(
+        utc_datetime,
+        timezone_str="Africa/Harare",
+        include_timezone_name=True,
+    ):
+        return {
+            "utc": utc_datetime.isoformat(),
+            "local": utc_datetime.isoformat(),
+            "timezone": timezone_str,
+            "display": utc_datetime.isoformat(),
+        }
+
+    monkeypatch.setattr(timezone_helper, "format_exam_time", _safe_format_exam_time)
 
 
 @pytest.fixture
@@ -156,7 +218,7 @@ class TestDashboardPipelineIntegration:
         )
         
         # Execute dashboard pipeline
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         result = await orchestrator.execute_pipeline(
             pipeline_name="student_dashboard_v1",
             payload={
@@ -173,7 +235,7 @@ class TestDashboardPipelineIntegration:
         
         # Verify exam_structure ran
         assert "exam_structure" in result["engine_outputs"]
-        exam_structure_output = result["engine_outputs"]["exam_structure"]
+        exam_structure_output = result["engine_outputs"]["exam_structure"]["data"]
         assert "upcoming_exams" in exam_structure_output
         
         # Verify upcoming exams populated
@@ -198,7 +260,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_different_candidates_see_different_exams(self, seed_test_exams):
         """Test that different candidates see only their assigned exams."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         
         # Candidate A
         context_a = ExecutionContext.create(user_id="test_candidate_a")
@@ -212,7 +274,7 @@ class TestDashboardPipelineIntegration:
             context=context_a
         )
         
-        upcoming_a = result_a["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_a = result_a["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Candidate B
         context_b = ExecutionContext.create(user_id="test_candidate_b")
@@ -226,7 +288,7 @@ class TestDashboardPipelineIntegration:
             context=context_b
         )
         
-        upcoming_b = result_b["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_b = result_b["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Verify different exam lists
         # Candidate A: Biology, Math, Physics (cohort) = 3
@@ -250,7 +312,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_no_upcoming_exams_returns_empty_list(self, clean_test_db):
         """Test graceful handling when candidate has no upcoming exams."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         context = ExecutionContext.create(user_id="test_candidate_no_exams")
         
         result = await orchestrator.execute_pipeline(
@@ -263,7 +325,7 @@ class TestDashboardPipelineIntegration:
         )
         
         assert result["success"] is True
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Should be empty list, not None, not error
         assert upcoming_exams == []
@@ -272,7 +334,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_past_exams_excluded(self, seed_test_exams):
         """Test that past exams are excluded from upcoming exams."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         context = ExecutionContext.create(user_id="test_candidate_a")
         
         result = await orchestrator.execute_pipeline(
@@ -285,7 +347,7 @@ class TestDashboardPipelineIntegration:
             context=context
         )
         
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # History exam is in the past - should not appear
         subjects = {exam["subject"] for exam in upcoming_exams}
@@ -294,7 +356,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_cancelled_exams_excluded(self, seed_test_exams):
         """Test that cancelled exams are excluded."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         context = ExecutionContext.create(user_id="test_candidate_a")
         
         result = await orchestrator.execute_pipeline(
@@ -307,7 +369,7 @@ class TestDashboardPipelineIntegration:
             context=context
         )
         
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Geography exam is cancelled - should not appear
         subjects = {exam["subject"] for exam in upcoming_exams}
@@ -316,7 +378,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_cohort_filtering_works(self, seed_test_exams):
         """Test that cohort-based exam assignment works."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         
         # Candidate with cohort_test should see Physics exam
         context = ExecutionContext.create(user_id="test_candidate_a")
@@ -330,7 +392,7 @@ class TestDashboardPipelineIntegration:
             context=context
         )
         
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         subjects = {exam["subject"] for exam in upcoming_exams}
         
         # Should include Physics (cohort exam)
@@ -339,7 +401,7 @@ class TestDashboardPipelineIntegration:
     @pytest.mark.asyncio
     async def test_exams_sorted_by_date(self, seed_test_exams):
         """Test that upcoming exams are sorted chronologically."""
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         context = ExecutionContext.create(user_id="test_candidate_a")
         
         result = await orchestrator.execute_pipeline(
@@ -352,7 +414,7 @@ class TestDashboardPipelineIntegration:
             context=context
         )
         
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Verify chronological order
         # Biology (10 days) → Math (15 days) → Physics (25 days)
@@ -384,7 +446,7 @@ class TestDashboardPipelineIntegration:
             "updated_at": datetime.utcnow(),
         })
         
-        orchestrator = Orchestrator()
+        orchestrator = Orchestrator(engine_registry)
         context = ExecutionContext.create(user_id="test_boundary_candidate")
         
         result = await orchestrator.execute_pipeline(
@@ -396,7 +458,7 @@ class TestDashboardPipelineIntegration:
             context=context
         )
         
-        upcoming_exams = result["engine_outputs"]["exam_structure"]["upcoming_exams"]
+        upcoming_exams = result["engine_outputs"]["exam_structure"]["data"]["upcoming_exams"]
         
         # Exam in 1 hour should be included
         assert len(upcoming_exams) == 1

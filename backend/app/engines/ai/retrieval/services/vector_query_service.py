@@ -8,7 +8,9 @@ import logging
 from typing import Dict, List, Optional
 from pymongo import MongoClient
 from pymongo.errors import PyMongoError
+from pymongo.database import Database
 
+from app.config.knowledge_contract import QUESTION_EMBEDDINGS, SYLLABUS_EMBEDDINGS
 from app.engines.ai.retrieval.schemas.output import EvidenceChunk
 from app.engines.ai.retrieval.errors import (
     VectorStoreUnavailableError,
@@ -17,11 +19,9 @@ from app.engines.ai.retrieval.errors import (
 
 logger = logging.getLogger(__name__)
 
-# MongoDB configuration (should be in environment variables in production)
-MONGO_URI = "mongodb://localhost:27017/"
-DATABASE_NAME = "zimprep"
-COLLECTION_NAME = "marking_evidence"
-VECTOR_INDEX_NAME = "evidence_vector_index"
+# Vector index names
+QUESTION_VECTOR_INDEX = "question_vector_index"
+SYLLABUS_VECTOR_INDEX = "syllabus_vector_index"
 
 # Similarity thresholds for each tier
 SIMILARITY_THRESHOLDS = {
@@ -40,18 +40,19 @@ class VectorQueryService:
     evidence matches the question context.
     """
     
-    def __init__(self, mongo_client: Optional[MongoClient] = None):
+    def __init__(self, database: Optional[Database] = None):
         """Initialize vector query service.
         
         Args:
-            mongo_client: MongoDB client instance (optional, for testing)
+            database: MongoDB database instance (optional, for testing)
         """
-        self.client = mongo_client
-        self.collection = None
+        self.db = database
+        self.question_collection = None
+        self.syllabus_collection = None
         
-        if self.client:
-            self.db = self.client[DATABASE_NAME]
-            self.collection = self.db[COLLECTION_NAME]
+        if self.db:
+            self.question_collection = self.db[QUESTION_EMBEDDINGS]
+            self.syllabus_collection = self.db[SYLLABUS_EMBEDDINGS]
     
     def _ensure_connection(self, trace_id: str) -> None:
         """Ensure MongoDB connection is established.
@@ -62,19 +63,18 @@ class VectorQueryService:
         Raises:
             VectorStoreUnavailableError: If connection cannot be established
         """
-        if not self.client:
+        if not self.db:
             try:
-                self.client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-                # Test connection
-                self.client.admin.command('ping')
-                self.db = self.client[DATABASE_NAME]
-                self.collection = self.db[COLLECTION_NAME]
+                from app.config.database import get_database
+                self.db = get_database()
+                self.question_collection = self.db[QUESTION_EMBEDDINGS]
+                self.syllabus_collection = self.db[SYLLABUS_EMBEDDINGS]
                 
                 logger.info(
                     "MongoDB connection established",
-                    extra={"trace_id": trace_id}
+                    extra={"trace_id": trace_id, "database": self.db.name}
                 )
-            except PyMongoError as e:
+            except Exception as e:
                 logger.error(
                     f"Failed to connect to MongoDB: {e}",
                     extra={"trace_id": trace_id}
@@ -202,7 +202,7 @@ class VectorQueryService:
             pipeline = [
                 {
                     "$vectorSearch": {
-                        "index": VECTOR_INDEX_NAME,
+                        "index": QUESTION_VECTOR_INDEX,
                         "path": "embedding",
                         "queryVector": embedding,
                         "numCandidates": limit * 10,  # Overquery for better results
@@ -240,7 +240,7 @@ class VectorQueryService:
                 }
             ]
             
-            results = list(self.collection.aggregate(pipeline))
+            results = list(self.question_collection.aggregate(pipeline))
             
             # Convert to EvidenceChunk objects
             chunks = []
@@ -272,7 +272,11 @@ class VectorQueryService:
             )
     
     def close(self):
-        """Close MongoDB connection."""
-        if self.client:
-            self.client.close()
-            logger.info("MongoDB connection closed")
+        """Clean up resources.
+        
+        Note: Does not close the shared database connection.
+        """
+        # Shared database connection is managed by app.config.database
+        # No cleanup needed here
+        logger.info("Vector query service resources released")
+
