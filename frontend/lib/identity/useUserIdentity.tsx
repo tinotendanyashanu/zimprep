@@ -2,51 +2,46 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { UserIdentity, Role } from "./types";
+import { getUser, User } from "@/lib/auth";
 
-const MOCK_IDENTITIES: Record<string, UserIdentity> = {
-  student: {
-    user_id: "student_001",
-    role: "STUDENT",
-    permissions: ["practice", "view_results", "view_history"],
-  },
-  parent: {
-    user_id: "parent_001",
-    role: "PARENT",
-    linked_student_id: "student_001",
-    permissions: ["view_progress"],
-  },
-  admin: {
-    user_id: "admin_001",
-    role: "ADMIN",
-    permissions: ["audit", "manage_content"],
-  },
-};
+const IdentityContext = createContext<IdentityContextValue | undefined>(undefined);
 
 interface IdentityContextValue {
   identity: UserIdentity | null;
   isLoading: boolean;
-  setMockRole: (role: Role) => void;
+  setMockRole: (role: Role) => void; // Kept for interface compatibility but warns logs
 }
-
-const IdentityContext = createContext<IdentityContextValue | undefined>(undefined);
 
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<UserIdentity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
+  // Sync identity with real auth state
   useEffect(() => {
-    const storedRole = localStorage.getItem("mock_role") as Role | null;
-    const role = storedRole || "STUDENT";
-    const mockKey = role.toLowerCase();
-    const mockIdentity = MOCK_IDENTITIES[mockKey] || MOCK_IDENTITIES.student;
-    setIdentity(mockIdentity);
-    setIsLoading(false);
+    const loadIdentity = () => {
+        const user = getUser();
+        if (user) {
+            setIdentity({
+                user_id: user.id,
+                role: user.role as Role || "STUDENT",
+              permissions: derivePermissions(user.role || "STUDENT")
+            });
+        } else {
+            setIdentity(null);
+        }
+        setIsLoading(false);
+    };
+
+    // Initial load
+    loadIdentity();
+
+    // Optional: Listen for storage events (logout in other tabs)
+    window.addEventListener('storage', loadIdentity);
+    return () => window.removeEventListener('storage', loadIdentity);
   }, []);
 
   const setMockRole = (role: Role) => {
-    localStorage.setItem("mock_role", role);
-    const mockKey = role.toLowerCase();
-    setIdentity(MOCK_IDENTITIES[mockKey] || MOCK_IDENTITIES.student);
+    console.warn("setMockRole is deprecated. Identity is now driven by real auth.");
   };
 
   return (
@@ -54,6 +49,14 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
       {children}
     </IdentityContext.Provider>
   );
+}
+
+// Helper to map roles to permissions
+function derivePermissions(role: string): string[] {
+    const normalizedRole = role.toUpperCase();
+    if (normalizedRole === 'ADMIN') return ["audit", "manage_content"];
+    if (normalizedRole === 'PARENT') return ["view_progress"];
+    return ["practice", "view_results", "view_history"]; // Student default
 }
 
 export function useUserIdentity(): IdentityContextValue {

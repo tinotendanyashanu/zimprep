@@ -4,12 +4,15 @@ Test script for Phase B3: Reporting & Institutional Outputs
 This script executes the reporting_v1 pipeline and verifies all success criteria.
 """
 
-import requests
 import json
 from datetime import datetime
 
-# Base URL
-BASE_URL = "http://localhost:8000"
+from fastapi.testclient import TestClient
+
+from app.main import app
+
+# Test client
+client = TestClient(app)
 
 # Mock JWT token (in production, this would be real)
 MOCK_TOKEN = "Bearer mock_jwt_token_for_testing"
@@ -18,8 +21,8 @@ def test_pipeline_list():
     """Test 1: Verify reporting_v1 pipeline exists."""
     print("\n=== TEST 1: Verify Pipeline Exists ===")
     
-    response = requests.get(
-        f"{BASE_URL}/api/v1/pipelines",
+    response = client.get(
+        "/api/v1/pipelines",
         headers={"Authorization": MOCK_TOKEN}
     )
     
@@ -44,8 +47,8 @@ def test_engine_list():
     """Test 2: Verify all required engines are registered."""
     print("\n=== TEST 2: Verify Engines Registered ===")
     
-    response = requests.get(
-        f"{BASE_URL}/api/v1/engines",
+    response = client.get(
+        "/api/v1/engines",
         headers={"Authorization": MOCK_TOKEN}
     )
     
@@ -93,8 +96,8 @@ def test_reporting_pipeline_execution():
     print(f"Sending request:")
     print(json.dumps(request_payload, indent=2))
     
-    response = requests.post(
-        f"{BASE_URL}/api/v1/pipeline/execute",
+    response = client.post(
+        "/api/v1/pipeline/execute",
         headers={
             "Authorization": MOCK_TOKEN,
             "Content-Type": "application/json"
@@ -202,5 +205,5 @@ def main():
 
 
 if __name__ == "__main__":
-    import sys
-    sys.exit(0 if main() else 1)
+    if not main():
+        raise RuntimeError("Phase B3 failed.")

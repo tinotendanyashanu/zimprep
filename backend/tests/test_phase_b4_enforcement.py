@@ -130,6 +130,8 @@ class TestPhaseB4Enforcement:
     def test_audit_includes_entitlements(self):
         """Test that audit input schema accepts entitlement fields."""
         from app.engines.audit_compliance.schemas.input import AuditComplianceInput
+        from app.engines.audit_compliance.schemas.cost_metadata import AICostMetadata
+        AuditComplianceInput.model_rebuild()
         
         # Create audit input with entitlements
         audit_data = {
@@ -145,6 +147,8 @@ class TestPhaseB4Enforcement:
                 "platform_version": "1.0.0",
                 "marking_scheme_version": "2024",
                 "syllabus_version": "2024",
+                "exam_regulations_version": "2024.1",
+                "policy_effective_date": datetime.utcnow(),
             },
             "final_grade": "A",
             "final_score": 85.5,

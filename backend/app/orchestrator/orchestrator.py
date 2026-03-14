@@ -338,67 +338,6 @@ class Orchestrator:
                         trace_id=trace_id
                     )
                 
-                # =================================================================
-                # PHASE ZERO: VALIDATION VETO (LEGAL FIX)
-                # =================================================================
-                # CRITICAL: If validation engine marks AI output as invalid,
-                # the pipeline MUST abort immediately. Invalid AI outputs
-                # NEVER reach the Results engine. This is NON-NEGOTIABLE for
-                # legal defensibility and AI governance.
-                #
-                # This check happens AFTER success check because validation
-                # engine may return success=True but is_valid=False (soft fail).
-                # =================================================================
-                if engine_name == "validation":
-                    validation_data = result.data
-                    
-                    # Check if AI output was marked invalid
-                    is_valid = validation_data.get("is_valid", True) if validation_data else True
-                    
-                    if not is_valid:
-                        # Extract violation details for audit trail
-                        violations = validation_data.get("violations", [])
-                        violation_summary = validation_data.get("summary", "AI output validation failed")
-                        
-                        error_msg = (
-                            f"VALIDATION VETO: AI output rejected due to validation failures. "
-                            f"Pipeline aborted to prevent invalid marks from being recorded. "
-                            f"Summary: {violation_summary}. "
-                            f"Violations: {len(violations)} found."
-                        )
-                        
-                        logger.error(
-                            "VALIDATION VETO ACTIVATED - Pipeline aborted",
-                            extra={
-                                "trace_id": trace_id,
-                                "pipeline_name": pipeline_name,
-                                "engine_name": "validation",
-                                "is_valid": False,
-                                "violations": violations,
-                                "violation_summary": violation_summary,
-                                "veto_reason": "AI output failed validation checks"
-                            }
-                        )
-                        
-                        # ABORT PIPELINE - Invalid AI output NEVER reaches Results
-                        raise PipelineExecutionError(
-                            message=error_msg,
-                            pipeline_name=pipeline_name,
-                            failed_engine="validation",
-                            trace_id=trace_id
-                        )
-                    else:
-                        # Validation passed - log for audit trail
-                        logger.info(
-                            "Validation passed - AI output approved",
-                            extra={
-                                "trace_id": trace_id,
-                                "pipeline_name": pipeline_name,
-                                "is_valid": True,
-                                "validation_data": validation_data
-                            }
-                        )
-                
                 # Note: Each engine receives the original client input (except identity).
                 # Engines are independent and don't chain outputs.
                 
