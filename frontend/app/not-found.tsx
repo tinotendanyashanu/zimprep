@@ -1,22 +1,17 @@
-import { EmptyState } from "@/components/system/EmptyState";
 import Link from "next/link";
-import { FileQuestion } from "lucide-react";
-import { Button } from "@/components/ui/button";
 
 export default function NotFound() {
   return (
     <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        <EmptyState
-          icon={FileQuestion}
-          title="Page Not Found"
-          description="The page you are looking for does not exist or has been moved."
-        />
-        <div className="mt-6 flex justify-center">
-          <Button asChild variant="default">
-            <Link href="/dashboard">Return Home</Link>
-          </Button>
-        </div>
+      <div className="text-center">
+        <h1 className="text-4xl font-bold text-foreground mb-2">404</h1>
+        <p className="text-muted-foreground mb-6">This page doesn&apos;t exist.</p>
+        <Link
+          href="/"
+          className="inline-flex items-center px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:opacity-90 transition"
+        >
+          Go home
+        </Link>
       </div>
     </div>
   );

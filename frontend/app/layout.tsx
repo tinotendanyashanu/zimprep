@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { DM_Sans } from "next/font/google";
 import "./globals.css";
-import { SessionRecoveryNotice } from "@/components/system/SessionRecoveryNotice";
-import { IdentityProvider } from "@/lib/identity/useUserIdentity";
 
 const dmSans = DM_Sans({
   subsets: ["latin"],
@@ -26,12 +24,7 @@ export default function RootLayout({
         className={`${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground`}
         suppressHydrationWarning
       >
-        <IdentityProvider>
-          <main className="relative">
-            {children}
-            <SessionRecoveryNotice />
-          </main>
-        </IdentityProvider>
+        <main className="relative">{children}</main>
       </body>
     </html>
   );
