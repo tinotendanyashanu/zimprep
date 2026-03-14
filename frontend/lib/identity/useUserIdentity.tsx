@@ -1,10 +1,18 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  ReactNode,
+} from "react";
 import { UserIdentity, Role } from "./types";
 import { getUser, User } from "@/lib/auth";
 
-const IdentityContext = createContext<IdentityContextValue | undefined>(undefined);
+const IdentityContext = createContext<IdentityContextValue | undefined>(
+  undefined,
+);
 
 interface IdentityContextValue {
   identity: UserIdentity | null;
@@ -19,29 +27,31 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   // Sync identity with real auth state
   useEffect(() => {
     const loadIdentity = () => {
-        const user = getUser();
-        if (user) {
-            setIdentity({
-                user_id: user.id,
-                role: user.role as Role || "STUDENT",
-              permissions: derivePermissions(user.role || "STUDENT")
-            });
-        } else {
-            setIdentity(null);
-        }
-        setIsLoading(false);
+      const user = getUser();
+      if (user) {
+        setIdentity({
+          user_id: user.id,
+          role: (user.role as Role) || "STUDENT",
+          permissions: derivePermissions(user.role || "STUDENT"),
+        });
+      } else {
+        setIdentity(null);
+      }
+      setIsLoading(false);
     };
 
     // Initial load
     loadIdentity();
 
     // Optional: Listen for storage events (logout in other tabs)
-    window.addEventListener('storage', loadIdentity);
-    return () => window.removeEventListener('storage', loadIdentity);
+    window.addEventListener("storage", loadIdentity);
+    return () => window.removeEventListener("storage", loadIdentity);
   }, []);
 
   const setMockRole = (role: Role) => {
-    console.warn("setMockRole is deprecated. Identity is now driven by real auth.");
+    console.warn(
+      "setMockRole is deprecated. Identity is now driven by real auth.",
+    );
   };
 
   return (
@@ -53,10 +63,10 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
 
 // Helper to map roles to permissions
 function derivePermissions(role: string): string[] {
-    const normalizedRole = role.toUpperCase();
-    if (normalizedRole === 'ADMIN') return ["audit", "manage_content"];
-    if (normalizedRole === 'PARENT') return ["view_progress"];
-    return ["practice", "view_results", "view_history"]; // Student default
+  const normalizedRole = role.toUpperCase();
+  if (normalizedRole === "ADMIN") return ["audit", "manage_content"];
+  if (normalizedRole === "PARENT") return ["view_progress"];
+  return ["practice", "view_results", "view_history"]; // Student default
 }
 
 export function useUserIdentity(): IdentityContextValue {
