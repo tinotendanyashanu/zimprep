@@ -58,7 +58,9 @@ class UpdateQuestionRequest(BaseModel):
 @router.post("/papers/upload")
 async def upload_paper(
     background_tasks: BackgroundTasks,
-    subject_id: str = Form(...),
+    subject_id: Optional[str] = Form(None),
+    subject_name: Optional[str] = Form(None),
+    level: Optional[str] = Form(None),
     year: int = Form(...),
     paper_number: int = Form(...),
     file: UploadFile = File(...),
@@ -71,6 +73,16 @@ async def upload_paper(
     3. Kick off the extraction pipeline in the background
     4. Return the paper_id immediately
     """
+    if not subject_id:
+        if not subject_name or not level:
+            raise HTTPException(
+                status_code=422,
+                detail="Provide either subject_id, or both subject_name and level",
+            )
+
+        if level not in ("Grade7", "O", "A"):
+            raise HTTPException(status_code=422, detail="level must be one of: Grade7, O, A")
+
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
 
@@ -79,6 +91,35 @@ async def upload_paper(
     storage_path = f"{paper_id}/{file.filename}"
 
     supabase = get_supabase()
+
+    # Resolve or create subject by name/level when subject_id is not provided.
+    if not subject_id:
+        try:
+            subject_result = (
+                supabase.table("subject")
+                .select("id")
+                .eq("name", subject_name)
+                .eq("level", level)
+                .limit(1)
+                .execute()
+            )
+
+            if subject_result.data:
+                subject_id = subject_result.data[0]["id"]
+            else:
+                created_subject = (
+                    supabase.table("subject")
+                    .insert({"name": subject_name, "level": level})
+                    .execute()
+                )
+                if not created_subject.data:
+                    raise HTTPException(status_code=500, detail="Failed to create subject")
+                subject_id = created_subject.data[0]["id"]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.error("Subject resolve/create failed: %s", exc)
+            raise HTTPException(status_code=500, detail=f"Subject lookup failed: {exc}")
 
     # 1. Upload PDF to storage
     try:
