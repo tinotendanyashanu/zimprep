@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import admin, sessions, attempts, students
+from routers import admin, papers, sessions, attempts, students
 
 load_dotenv()
 
@@ -26,6 +26,7 @@ app.add_middleware(
 
 # Routers
 app.include_router(admin.router, prefix="/admin", tags=["admin"])
+app.include_router(papers.router, prefix="/papers", tags=["papers"])
 app.include_router(sessions.router, prefix="/sessions", tags=["sessions"])
 app.include_router(attempts.router, prefix="/attempts", tags=["attempts"])
 app.include_router(students.router, prefix="/students", tags=["students"])

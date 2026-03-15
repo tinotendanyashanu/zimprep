@@ -1,24 +1,222 @@
 """
-Marking Service — AI-powered answer marking using Claude.
-Stub for Week 1. Full implementation in Week 2.
+AI Marking Service
+
+Marks student attempts using Claude with cost optimisations:
+- MCQ: answer key lookup (zero Claude cost)
+- Haiku for ≤3 mark questions, Sonnet for >3 marks
+- Exact answer caching (same question+answer = reuse result)
+- Empty/trivial answers score 0 without calling Claude
+- 20-char minimum for written answers
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
+from datetime import datetime, timezone
+from typing import Any
+
+import anthropic
+
+from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
+
+MARKING_SYSTEM_PROMPT = """You are an experienced ZIMSEC examiner. Given a question and a student's answer, evaluate the answer and return ONLY valid JSON matching this schema exactly:
+{
+  "score": <integer from 0 to the question's maximum marks>,
+  "feedback": {
+    "correct_points": [<string>, ...],
+    "missing_points": [<string>, ...],
+    "examiner_note": <string>
+  },
+  "references": [<topic string>, ...]
+}
+No preamble. No markdown. No explanation outside the JSON."""
+
+_FALLBACK_RESULT: dict[str, Any] = {
+    "score": 0,
+    "feedback": {
+        "correct_points": [],
+        "missing_points": [],
+        "examiner_note": "Marking error — please flag this question.",
+    },
+    "references": [],
+}
+
+
+def _update_attempt(attempt_id: str, result: dict[str, Any], marks: int) -> None:
+    supabase = get_supabase()
+    score = min(int(result.get("score", 0)), marks)
+    supabase.table("attempt").update(
+        {
+            "ai_score": score,
+            "ai_feedback": result.get("feedback"),
+            "ai_references": result.get("references", []),
+            "marked_at": datetime.now(timezone.utc).isoformat(),
+        }
+    ).eq("id", attempt_id).execute()
 
 
 def mark_attempt(attempt_id: str) -> None:
     """
-    Mark a student's attempt using Claude.
-
-    Steps (Week 2):
-    1. Fetch attempt + question from DB
-    2. Build marking prompt with question text, mark scheme, student answer
-    3. Call Claude with structured output for score + feedback
-    4. Update attempt row with ai_score, ai_feedback, ai_references, marked_at
-    5. Update weak_topic and syllabus_coverage accordingly
+    Mark a single attempt. Designed to be called directly (practice mode)
+    or from mark_session (exam mode background task).
     """
-    # TODO Week 2
-    logger.info("mark_attempt called for %s (not yet implemented)", attempt_id)
+    supabase = get_supabase()
+
+    # Fetch attempt with nested question + subject
+    row = (
+        supabase.table("attempt")
+        .select("*, question!inner(*, subject!inner(*))")
+        .eq("id", attempt_id)
+        .single()
+        .execute()
+    )
+    if not row.data:
+        logger.error("Attempt %s not found", attempt_id)
+        return
+
+    attempt = row.data
+    question = attempt["question"]
+    subject = question["subject"]
+    marks: int = int(question.get("marks", 0))
+    student_answer: str | None = attempt.get("student_answer")
+    question_type: str = question.get("question_type", "written")
+
+    result: dict[str, Any]
+
+    # ── MCQ path (zero Claude cost) ────────────────────────────────────────────
+    if question_type == "mcq":
+        mcq_row = (
+            supabase.table("mcq_answer")
+            .select("correct_option")
+            .eq("question_id", question["id"])
+            .single()
+            .execute()
+        )
+        if mcq_row.data:
+            correct = mcq_row.data["correct_option"]
+            given = (student_answer or "").strip().upper()
+            is_correct = given == correct
+            result = {
+                "score": marks if is_correct else 0,
+                "feedback": {
+                    "correct_points": [f"Correct answer: {correct}"] if is_correct else [],
+                    "missing_points": [] if is_correct else [f"Correct answer was: {correct}"],
+                    "examiner_note": "Correct." if is_correct else f"Incorrect. The correct answer is {correct}.",
+                },
+                "references": [],
+            }
+            _update_attempt(attempt_id, result, marks)
+            return
+        else:
+            logger.warning(
+                "MCQ answer row missing for question %s — falling back to written marking",
+                question["id"],
+            )
+            question_type = "written"
+
+    # ── Empty / trivial answer gate ────────────────────────────────────────────
+    if not student_answer or not student_answer.strip():
+        result = {
+            "score": 0,
+            "feedback": {
+                "correct_points": [],
+                "missing_points": [],
+                "examiner_note": "No answer provided.",
+            },
+            "references": [],
+        }
+        _update_attempt(attempt_id, result, marks)
+        return
+
+    if len(student_answer.strip()) < 20:
+        result = {
+            "score": 0,
+            "feedback": {
+                "correct_points": [],
+                "missing_points": [],
+                "examiner_note": "Answer too short to evaluate.",
+            },
+            "references": [],
+        }
+        _update_attempt(attempt_id, result, marks)
+        return
+
+    # ── Cache check ────────────────────────────────────────────────────────────
+    cached = (
+        supabase.table("attempt")
+        .select("ai_score, ai_feedback, ai_references")
+        .eq("question_id", question["id"])
+        .eq("student_answer", student_answer)
+        .not_.is_("marked_at", "null")
+        .neq("id", attempt_id)
+        .limit(1)
+        .execute()
+    )
+    if cached.data:
+        cached_row = cached.data[0]
+        result = {
+            "score": cached_row["ai_score"],
+            "feedback": cached_row["ai_feedback"],
+            "references": cached_row["ai_references"] or [],
+        }
+        _update_attempt(attempt_id, result, marks)
+        return
+
+    # ── Claude marking ─────────────────────────────────────────────────────────
+    model = "claude-haiku-4-5-20251001" if marks <= 3 else "claude-sonnet-4-6"
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
+    prompt = (
+        f"Subject: {subject['name']} ({subject['level']})\n"
+        f"Question ({marks} mark{'s' if marks != 1 else ''}): {question['text']}\n"
+        f"Student Answer: {student_answer}"
+    )
+
+    try:
+        message = client.messages.create(
+            model=model,
+            max_tokens=1024,
+            system=MARKING_SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = message.content[0].text.strip()
+        # Strip markdown fences if Claude wrapped the JSON anyway
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        result = json.loads(raw)
+    except Exception as exc:
+        logger.error("Claude marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
+        result = dict(_FALLBACK_RESULT)
+
+    _update_attempt(attempt_id, result, marks)
+
+
+def mark_session(session_id: str) -> None:
+    """
+    Batch mark all attempts in a session. Designed to run as a FastAPI BackgroundTask.
+    Each attempt is marked independently — one failure does not block the rest.
+    """
+    supabase = get_supabase()
+    attempts = (
+        supabase.table("attempt")
+        .select("id")
+        .eq("session_id", session_id)
+        .execute()
+    )
+    for row in attempts.data:
+        try:
+            mark_attempt(row["id"])
+        except Exception as exc:
+            logger.error(
+                "Failed to mark attempt %s in session %s: %s",
+                row["id"],
+                session_id,
+                exc,
+            )
+    logger.info("Batch marking complete for session %s", session_id)
