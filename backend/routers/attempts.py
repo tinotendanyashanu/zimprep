@@ -11,7 +11,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from db.client import get_supabase
+from db.models_subscription import DAILY_FREE_LIMIT
 from services.marking import mark_attempt
+from services.quota import check_practice_quota
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -34,6 +36,35 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
     Submit a single answer (practice mode). Marks synchronously and returns
     the attempt row with AI feedback.
     """
+    # Quota check: determine question type first (MCQ is free, written counts against limit)
+    question_type = "written"
+    if body.session_id:
+        supabase_check = get_supabase()
+        q_result = (
+            supabase_check.table("question")
+            .select("question_type")
+            .eq("id", body.question_id)
+            .single()
+            .execute()
+        )
+        if q_result.data:
+            question_type = q_result.data.get("question_type", "written")
+
+    quota = check_practice_quota(body.session_id, question_type)
+    if not quota.allowed:
+        raise HTTPException(
+            status_code=402,
+            detail={
+                "code": "quota_exceeded",
+                "tier": quota.tier,
+                "used": quota.used,
+                "limit": quota.limit,
+                "feature": "practice",
+                "message": f"Daily limit of {DAILY_FREE_LIMIT} questions reached. "
+                           "Upgrade to continue practising.",
+            },
+        )
+
     supabase = get_supabase()
     attempt_id = str(uuid.uuid4())
 

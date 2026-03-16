@@ -76,13 +76,97 @@ export type ResultsResponse = {
   attempts: Attempt[];
 };
 
+export type WeakTopic = {
+  topic: string;
+  fail_ratio: number;
+  attempt_count: number;
+};
+
+export type PracticeAttemptResult = Attempt;
+
+export type ReadinessData = {
+  readiness_index: number;
+  accuracy: number;
+  coverage: number;
+  consistency: number;
+};
+
+export type StreakData = {
+  current: number;
+  longest: number;
+};
+
+export type SessionSummary = {
+  session_id: string;
+  mode: string;
+  completed_at: string | null;
+  paper_year: number | null;
+  paper_number: number | null;
+  subject_name: string | null;
+  score: number;
+  total_marks: number;
+  percentage: number | null;
+};
+
+export type CoverageEntry = {
+  topic: string;
+  attempt_count: number;
+  last_attempted: string | null;
+};
+
+export type CoverageData = {
+  covered: CoverageEntry[];
+  uncovered: CoverageEntry[];
+  covered_count: number;
+  total_count: number;
+};
+
+export type SubjectSummary = {
+  id: string;
+  name: string;
+  level: string;
+};
+
+export type DashboardData = {
+  has_data: boolean;
+  subject_id?: string;
+  subjects: SubjectSummary[];
+  readiness: ReadinessData | null;
+  streak: StreakData;
+  coverage: CoverageData | null;
+  weak_topics: WeakTopic[];
+  recent_sessions: SessionSummary[];
+};
+
+export type ParentChild = {
+  id: string;
+  name: string;
+  email: string;
+  level: string;
+  created_at: string;
+};
+
 // ── Core fetch helper ──────────────────────────────────────────────────────────
+
+export class ApiError extends Error {
+  status: number;
+  body: unknown;
+  constructor(message: string, status: number, body: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.body = body;
+  }
+}
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BACKEND}${path}`, init);
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error((err as { detail?: string }).detail ?? `Request failed (${res.status})`);
+    const json = await res.json().catch(() => ({}));
+    const detail = (json as { detail?: unknown }).detail;
+    const message =
+      typeof detail === "string" ? detail : `Request failed (${res.status})`;
+    throw new ApiError(message, res.status, detail ?? json);
   }
   return res.json() as Promise<T>;
 }
@@ -144,3 +228,103 @@ export const flagAttempt = (attemptId: string) =>
   apiFetch<{ flagged: boolean }>(`/attempts/${attemptId}/flag`, {
     method: "PATCH",
   });
+
+export const getPracticeSession = (studentId: string, subjectId: string) =>
+  apiFetch<{ session_id: string }>("/sessions/practice", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ student_id: studentId, subject_id: subjectId }),
+  });
+
+export const getNextQuestion = (subjectId: string, studentId: string, topic?: string) => {
+  const params = new URLSearchParams({ subject_id: subjectId, student_id: studentId });
+  if (topic) params.set("topic", topic);
+  return apiFetch<Question>(`/papers/questions/next?${params}`);
+};
+
+export const getSubjectTopics = (subjectId: string) =>
+  apiFetch<string[]>(`/papers/subjects/${subjectId}/topics`);
+
+export const getWeakTopics = (subjectId: string, studentId: string) =>
+  apiFetch<WeakTopic[]>(
+    `/papers/subjects/${subjectId}/weak-topics?student_id=${studentId}`,
+  );
+
+// ── Dashboard / Student analytics ──────────────────────────────────────────────
+
+export const getStudentDashboard = (
+  studentId: string,
+  subjectId?: string,
+  token?: string,
+) => {
+  const params = subjectId ? `?subject_id=${subjectId}` : "";
+  return apiFetch<DashboardData>(`/students/${studentId}/dashboard${params}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+};
+
+export const getStudentSubjects = (studentId: string, token?: string) =>
+  apiFetch<SubjectSummary[]>(`/students/${studentId}/subjects`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const getStudentCoverage = (
+  studentId: string,
+  subjectId: string,
+  token?: string,
+) =>
+  apiFetch<CoverageData>(`/students/${studentId}/coverage/${subjectId}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const getStudentSessions = (
+  studentId: string,
+  limit = 10,
+  token?: string,
+) =>
+  apiFetch<SessionSummary[]>(
+    `/students/${studentId}/sessions?limit=${limit}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+
+export const getStudentStreak = (studentId: string, token?: string) =>
+  apiFetch<StreakData>(`/students/${studentId}/streak`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+// ── Parent account ──────────────────────────────────────────────────────────────
+
+export const getParentChildren = (parentId: string, token?: string) =>
+  apiFetch<ParentChild[]>(`/parents/${parentId}/children`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const linkChild = (
+  parentId: string,
+  childEmail: string,
+  token?: string,
+) =>
+  apiFetch<{ success: boolean; student_id: string; name: string }>(
+    `/parents/${parentId}/children/link`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ child_email: childEmail }),
+    },
+  );
+
+export const getChildProgress = (
+  parentId: string,
+  studentId: string,
+  subjectId?: string,
+  token?: string,
+) => {
+  const params = subjectId ? `?subject_id=${subjectId}` : "";
+  return apiFetch<DashboardData>(
+    `/parents/${parentId}/children/${studentId}/progress${params}`,
+    { headers: token ? { Authorization: `Bearer ${token}` } : {} },
+  );
+};

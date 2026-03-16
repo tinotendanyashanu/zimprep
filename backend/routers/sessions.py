@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from db.client import get_supabase
 from services.marking import mark_session
+from services.quota import check_exam_quota
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -30,13 +31,83 @@ class SaveAnswersRequest(BaseModel):
     answers: dict[str, str]  # {question_id: answer_text}
 
 
+class PracticeSessionRequest(BaseModel):
+    student_id: str
+    subject_id: str
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────────
+
+@router.post("/practice")
+def get_or_create_practice_session(body: PracticeSessionRequest) -> dict[str, Any]:
+    """Get existing or create a new long-lived practice session for a student+subject pair."""
+    supabase = get_supabase()
+
+    # Look for an existing active practice session linked to this subject
+    existing = (
+        supabase.table("session")
+        .select("id, paper_id")
+        .eq("student_id", body.student_id)
+        .eq("mode", "practice")
+        .eq("status", "active")
+        .execute()
+    )
+    for session in (existing.data or []):
+        paper = (
+            supabase.table("paper")
+            .select("subject_id")
+            .eq("id", session["paper_id"])
+            .single()
+            .execute()
+        )
+        if paper.data and paper.data["subject_id"] == body.subject_id:
+            return {"session_id": session["id"]}
+
+    # No existing session — pick a ready paper for the subject
+    paper_result = (
+        supabase.table("paper")
+        .select("id")
+        .eq("subject_id", body.subject_id)
+        .eq("status", "ready")
+        .limit(1)
+        .execute()
+    )
+    if not paper_result.data:
+        raise HTTPException(status_code=404, detail="No ready papers for this subject")
+
+    session_id = str(uuid.uuid4())
+    supabase.table("session").insert(
+        {
+            "id": session_id,
+            "student_id": body.student_id,
+            "paper_id": paper_result.data[0]["id"],
+            "mode": "practice",
+            "started_at": datetime.now(timezone.utc).isoformat(),
+            "status": "active",
+        }
+    ).execute()
+    return {"session_id": session_id}
+
 
 @router.post("/")
 def create_session(body: CreateSessionRequest) -> dict[str, Any]:
     """Create a new exam or practice session."""
     if body.mode not in ("exam", "practice"):
         raise HTTPException(status_code=422, detail="mode must be 'exam' or 'practice'")
+
+    # Exam mode is gated behind paid tiers
+    if body.mode == "exam":
+        quota = check_exam_quota(body.student_id)
+        if not quota.allowed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "tier_required",
+                    "tier": quota.tier,
+                    "feature": "exam",
+                    "message": "Exam Mode requires a paid subscription. Upgrade to access full past papers.",
+                },
+            )
 
     supabase = get_supabase()
     session_id = str(uuid.uuid4())

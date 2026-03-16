@@ -145,6 +145,31 @@ alter table attempt          enable row level security;
 alter table weak_topic       enable row level security;
 alter table syllabus_coverage enable row level security;
 
+-- Drop policies if they already exist so this migration can be re-run safely.
+drop policy if exists "Authenticated users can read subjects" on subject;
+drop policy if exists "Authenticated users can read papers" on paper;
+drop policy if exists "Authenticated users can read questions" on question;
+drop policy if exists "Authenticated users can read mcq answers" on mcq_answer;
+drop policy if exists "Authenticated users can read syllabus chunks" on syllabus_chunk;
+drop policy if exists "Students can read own profile" on student;
+drop policy if exists "Students can update own profile" on student;
+drop policy if exists "Students can insert own profile" on student;
+drop policy if exists "Parents can read own profile" on parent;
+drop policy if exists "Parents can update own profile" on parent;
+drop policy if exists "Parents can insert own profile" on parent;
+drop policy if exists "Students can read own sessions" on session;
+drop policy if exists "Students can insert own sessions" on session;
+drop policy if exists "Students can update own sessions" on session;
+drop policy if exists "Students can read own attempts" on attempt;
+drop policy if exists "Students can insert own attempts" on attempt;
+drop policy if exists "Students can update own attempts" on attempt;
+drop policy if exists "Students can read own weak topics" on weak_topic;
+drop policy if exists "Students can insert own weak topics" on weak_topic;
+drop policy if exists "Students can update own weak topics" on weak_topic;
+drop policy if exists "Students can read own syllabus coverage" on syllabus_coverage;
+drop policy if exists "Students can insert own syllabus coverage" on syllabus_coverage;
+drop policy if exists "Students can update own syllabus coverage" on syllabus_coverage;
+
 -- Public content: readable by all authenticated users
 create policy "Authenticated users can read subjects"
   on subject for select

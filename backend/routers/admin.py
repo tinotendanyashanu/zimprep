@@ -12,7 +12,9 @@ from pydantic import BaseModel
 from typing import Any, Optional
 
 from db.client import get_supabase
+from db.models_subscription import TIER_CONFIG, PAID_TIERS, PAYSTACK_PLAN_NAMES
 from services.extraction import run_extraction
+from services import paystack as ps
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -222,3 +224,39 @@ def update_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, 
         raise HTTPException(status_code=404, detail="Question not found")
 
     return result.data[0]
+
+
+@router.post("/paystack/create-plans")
+def create_paystack_plans() -> dict[str, Any]:
+    """
+    One-time setup: create Paystack recurring plans for all paid tiers and
+    store the resulting plan codes in a `paystack_plan` table.
+
+    Run once after deploying:
+        curl -X POST http://localhost:8000/admin/paystack/create-plans
+    """
+    supabase = get_supabase()
+
+    # Ensure the paystack_plan table exists (created inline; can also be in migration)
+    # We'll upsert into a simple key-value table: (tier, plan_code)
+
+    created: dict[str, str] = {}
+    errors: dict[str, str] = {}
+
+    for tier in PAID_TIERS:
+        name = PAYSTACK_PLAN_NAMES.get(tier, tier)
+        amount_usd = TIER_CONFIG[tier]["price_usd"]
+        try:
+            plan = ps.create_plan(name=name, amount_usd=amount_usd)
+            plan_code = plan.get("plan_code", "")
+            # Persist plan code
+            supabase.table("paystack_plan").upsert(
+                {"tier": tier, "plan_code": plan_code, "name": name}
+            ).execute()
+            created[tier] = plan_code
+            logger.info("Created Paystack plan for tier '%s': %s", tier, plan_code)
+        except Exception as exc:
+            errors[tier] = str(exc)
+            logger.error("Failed to create plan for tier '%s': %s", tier, exc)
+
+    return {"created": created, "errors": errors}
