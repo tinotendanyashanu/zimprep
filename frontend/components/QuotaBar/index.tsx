@@ -44,7 +44,7 @@ export function QuotaBar({ quota }: Props) {
         <p className="mt-2 flex items-center justify-between text-xs text-gray-500">
           <span>Daily limit reached — resets at midnight UTC</span>
           <Link
-            href="/pricing"
+            href="/subscription/pricing"
             className="ml-2 shrink-0 font-medium text-blue-600 hover:underline"
           >
             Upgrade
@@ -56,7 +56,7 @@ export function QuotaBar({ quota }: Props) {
         <p className="mt-1.5 text-xs text-gray-400">
           {quota.limit - quota.used} question
           {quota.limit - quota.used !== 1 ? "s" : ""} remaining today ·{" "}
-          <Link href="/pricing" className="text-blue-500 hover:underline">
+          <Link href="/subscription/pricing" className="text-blue-500 hover:underline">
             Upgrade for unlimited
           </Link>
         </p>

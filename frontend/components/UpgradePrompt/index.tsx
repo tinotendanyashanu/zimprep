@@ -67,7 +67,7 @@ export function UpgradePrompt({ detail, onDismiss }: Props) {
         {/* Actions */}
         <div className="flex flex-col gap-2">
           <Link
-            href="/pricing"
+            href="/subscription/pricing"
             className="block w-full rounded-lg bg-gray-900 px-4 py-2.5 text-center text-sm font-semibold text-white hover:bg-gray-700"
           >
             View plans

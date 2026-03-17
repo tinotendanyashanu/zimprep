@@ -76,7 +76,7 @@ export default function ManageSubscriptionPage() {
       <div className="mx-auto max-w-lg px-4 py-16 text-center">
         <p className="mb-4 text-gray-500">You don&apos;t have an active subscription.</p>
         <Link
-          href="/pricing"
+          href="/subscription/pricing"
           className="rounded-lg bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-gray-700"
         >
           View plans
@@ -163,7 +163,7 @@ export default function ManageSubscriptionPage() {
       {/* Actions */}
       <div className="mt-6 space-y-3">
         <Link
-          href="/pricing"
+          href="/subscription/pricing"
           className="block w-full rounded-lg border border-gray-200 px-4 py-2.5 text-center text-sm font-medium text-gray-700 hover:bg-gray-50"
         >
           Change plan

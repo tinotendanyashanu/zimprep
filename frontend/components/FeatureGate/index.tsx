@@ -37,7 +37,7 @@ function DefaultFallback({ feature }: { feature: FeatureGateProps["required"] })
       <p className="mb-1 font-semibold text-gray-800">{title}</p>
       <p className="mb-4 max-w-xs text-sm text-gray-500">{desc}</p>
       <Link
-        href="/pricing"
+        href="/subscription/pricing"
         className="rounded-lg bg-gray-900 px-5 py-2 text-sm font-medium text-white hover:bg-gray-700"
       >
         View plans
@@ -82,7 +82,7 @@ export function ExamModeGate({ tier, children }: ExamModeGateProps) {
         marking. Available on all paid plans.
       </p>
       <Link
-        href="/pricing"
+        href="/subscription/pricing"
         className="rounded-xl bg-gray-900 px-8 py-3 font-semibold text-white hover:bg-gray-700"
       >
         Unlock Exam Mode

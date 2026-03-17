@@ -14,11 +14,17 @@ app = FastAPI(
 )
 
 # CORS — allow frontend origin(s)
-origins = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+origins = [
+    origin.strip()
+    for origin in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+    if origin.strip()
+]
+origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX")
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
+    allow_origin_regex=origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -96,7 +96,7 @@ export default function SubscriptionCallbackPage() {
       <p className="max-w-sm text-gray-500">{error}</p>
       <div className="flex gap-3">
         <Link
-          href="/pricing"
+          href="/subscription/pricing"
           className="rounded-lg bg-gray-900 px-6 py-2.5 text-sm font-semibold text-white hover:bg-gray-700"
         >
           Try again
