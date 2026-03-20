@@ -17,7 +17,7 @@ interface UserProfile {
 
 export default function DashboardPage() {
   const router = useRouter();
-  const { data, loading, error, traceId } = useDashboard();
+  const { data, loading, error } = useDashboard();
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
   useEffect(() => {
@@ -44,11 +44,6 @@ export default function DashboardPage() {
         </div>
         <h2 className="text-xl font-bold text-zinc-900">Unable to load dashboard</h2>
         <p className="text-zinc-500 max-w-md">{error}</p>
-        {traceId && (
-            <code className="text-xs bg-zinc-100 px-2 py-1 rounded text-zinc-400 font-mono">
-                Trace: {traceId}
-            </code>
-        )}
         <Button onClick={() => window.location.reload()} variant="outline" className="mt-4">
             Try Again
         </Button>

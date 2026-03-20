@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { HistoryList } from "@/components/history/history-list";
-import { executePipeline } from "@/lib/api-client";
+import { getHistory } from "@/lib/history/data";
 import { getUser } from "@/lib/auth";
 import { LoadingState } from "@/components/system/LoadingState";
 import { useRouter } from "next/navigation";
@@ -25,34 +25,8 @@ export default function HistoryPage() {
         }
 
         try {
-            // Execute dashboard pipeline with history scope
-            const response = await executePipeline("student_dashboard_v1", {
-                user_id: user.id,
-                role: "student",
-                reporting_scope: "history",
-                trace_id: crypto.randomUUID(), 
-                exam_session_id: null 
-            });
-
-            // Extract history data
-            const reportingOutput = response.engine_outputs?.reporting?.data_payload 
-                                 || response.engine_outputs?.reporting 
-                                 || response.engine_outputs?.history;
-            
-            const historyData = reportingOutput?.history || [];
-            
-            // Map to frontend shape
-            const mappedHistory = historyData.map((item: any) => ({
-                id: item.trace_id || item.exam_id,
-                subject: item.exam_name.split(' - ')[0] || item.exam_name,
-                paper: item.exam_name.split(' - ')[1] || 'Paper 1',
-                date: new Date(item.date).toLocaleDateString(),
-                score: item.marks,
-                totalScore: item.max_marks,
-                grade: item.grade
-            }));
-
-            setHistory(mappedHistory);
+            const items = await getHistory(user.id);
+            setHistory(items);
         } catch (err) {
             console.error("Failed to load history:", err);
             setError("Failed to load history.");

@@ -1,7 +1,7 @@
 "use client";
 
 import { Button } from "@/components/ui/button";
-import { LogOut, User, History, CreditCard, BookOpen, Home } from "lucide-react";
+import { LogOut, User, History, CreditCard, BookOpen, Home, Shield } from "lucide-react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useUserIdentity } from "@/lib/identity/useUserIdentity";
@@ -14,9 +14,10 @@ interface DashboardHeaderProps {
 
 // Navigation items with their required routes for visibility check
 const NAV_ITEMS = [
-  { label: "Dashboard", href: "/dashboard", icon: Home },
-  { label: "History", href: "/history", icon: History },
-  { label: "Subscription", href: "/subscription", icon: CreditCard },
+  { label: "Dashboard", href: "/dashboard", icon: Home, roles: ["STUDENT"] },
+  { label: "History", href: "/history", icon: History, roles: ["STUDENT"] },
+  { label: "Subscription", href: "/subscription", icon: CreditCard, roles: ["STUDENT"] },
+  { label: "Admin Panel", href: "/admin", icon: Shield, roles: ["ADMIN"] },
 ];
 
 export function DashboardHeader({ title = "ZimPrep" }: DashboardHeaderProps) {
@@ -32,7 +33,7 @@ export function DashboardHeader({ title = "ZimPrep" }: DashboardHeaderProps) {
   // Filter nav items based on role
   const visibleNavItems = NAV_ITEMS.filter((item) => {
     if (!identity) return false;
-    return canAccessRoute(identity.role, item.href);
+    return item.roles ? item.roles.includes(identity.role) : canAccessRoute(identity.role, item.href);
   });
 
   return (

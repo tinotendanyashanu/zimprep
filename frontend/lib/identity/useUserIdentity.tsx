@@ -2,83 +2,63 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 import { UserIdentity, Role } from "./types";
-
-const MOCK_IDENTITIES: Record<string, UserIdentity> = {
-  student: {
-    user_id: "student_001",
-    role: "STUDENT",
-    permissions: ["practice", "view_results", "view_history"],
-  },
-  parent: {
-    user_id: "parent_001",
-    role: "PARENT",
-    linked_student_id: "student_001",
-    permissions: ["view_progress"],
-  },
-  admin: {
-    user_id: "admin_001",
-    role: "ADMIN",
-    permissions: ["audit", "manage_content"],
-  },
-};
+import { supabase } from "@/lib/supabase";
 
 interface IdentityContextValue {
   identity: UserIdentity | null;
   isLoading: boolean;
-  setMockRole: (role: Role) => void;
 }
 
 const IdentityContext = createContext<IdentityContextValue | undefined>(undefined);
+
+function roleToPermissions(role: Role): string[] {
+  switch (role) {
+    case "ADMIN":    return ["audit", "manage_content", "practice", "view_results", "view_history"];
+    case "PARENT":   return ["view_progress"];
+    case "EXAMINER": return ["manage_content"];
+    default:         return ["practice", "view_results", "view_history"];
+  }
+}
+
+function buildIdentity(user: { id: string; user_metadata?: Record<string, unknown> }): UserIdentity {
+  const rawRole = (user.user_metadata?.role as string | undefined)?.toUpperCase() as Role | undefined;
+  const role: Role = rawRole && ["STUDENT", "PARENT", "ADMIN", "EXAMINER"].includes(rawRole)
+    ? rawRole
+    : "STUDENT";
+  return {
+    user_id: user.id,
+    role,
+    linked_student_id: user.user_metadata?.linked_student_id as string | undefined,
+    permissions: roleToPermissions(role),
+  };
+}
 
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<UserIdentity | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    const storedRole = localStorage.getItem("mock_role") as Role | null;
-    const role = storedRole || "STUDENT";
-    const mockKey = role.toLowerCase();
-    const mockIdentity = MOCK_IDENTITIES[mockKey] || MOCK_IDENTITIES.student;
-    setIdentity(mockIdentity);
-    setIsLoading(false);
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) setIdentity(buildIdentity(user));
+      setIsLoading(false);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      setIdentity(session?.user ? buildIdentity(session.user) : null);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const setMockRole = (role: Role) => {
-    localStorage.setItem("mock_role", role);
-    const mockKey = role.toLowerCase();
-    setIdentity(MOCK_IDENTITIES[mockKey] || MOCK_IDENTITIES.student);
-  };
-
   return (
-    <IdentityContext.Provider value={{ identity, isLoading, setMockRole }}>
+    <IdentityContext.Provider value={{ identity, isLoading }}>
       {children}
     </IdentityContext.Provider>
   );
 }
 
 export function useUserIdentity(): IdentityContextValue {
-  const context = useContext(IdentityContext);
-  if (!context) {
-    return {
-      identity: null,
-      isLoading: true,
-      setMockRole: () => {},
-    };
-  }
-  return context;
-}
-
-export function useIsStudent(): boolean {
-  const { identity } = useUserIdentity();
-  return identity?.role === "STUDENT";
-}
-
-export function useIsParent(): boolean {
-  const { identity } = useUserIdentity();
-  return identity?.role === "PARENT";
-}
-
-export function useIsAdmin(): boolean {
-  const { identity } = useUserIdentity();
-  return identity?.role === "ADMIN";
+  const ctx = useContext(IdentityContext);
+  if (!ctx) throw new Error("useUserIdentity must be used within IdentityProvider");
+  return ctx;
 }

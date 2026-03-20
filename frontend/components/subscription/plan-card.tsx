@@ -1,13 +1,53 @@
+'use client';
+
+import { useState } from 'react';
 import { SubscriptionPlan } from '@/lib/subscription-data';
-import { Check, X } from 'lucide-react';
+import { Check, X, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface PlanCardProps {
   plan: SubscriptionPlan;
   isCurrentPlan: boolean;
+  /** Supabase access token for the logged-in user */
+  accessToken?: string;
 }
 
-export function PlanCard({ plan, isCurrentPlan }: PlanCardProps) {
+export function PlanCard({ plan, isCurrentPlan, accessToken }: PlanCardProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const isPaidPlan = plan.tier !== null;
+  const showCTA = isPaidPlan && !isCurrentPlan;
+
+  async function handleSubscribe() {
+    if (!accessToken) {
+      setError('Please sign in to subscribe.');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const callbackUrl = `${window.location.origin}/subscription/callback`;
+      const resp = await fetch('/api/subscription/checkout', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ tier: plan.tier, callback_url: callbackUrl }),
+      });
+      if (!resp.ok) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail ?? 'Checkout failed');
+      }
+      const { authorization_url } = await resp.json();
+      window.location.href = authorization_url;
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Something went wrong');
+      setLoading(false);
+    }
+  }
+
   return (
     <div
       className={cn(
@@ -18,7 +58,7 @@ export function PlanCard({ plan, isCurrentPlan }: PlanCardProps) {
           : 'border-border/60 hover:border-border/80'
       )}
     >
-      {/* Header Section */}
+      {/* Header */}
       <div className="mb-8 space-y-4">
         {isCurrentPlan && (
           <span className="inline-block px-3 py-1 text-xs font-medium tracking-wide rounded-full bg-primary/10 text-primary">
@@ -34,7 +74,7 @@ export function PlanCard({ plan, isCurrentPlan }: PlanCardProps) {
         </div>
       </div>
 
-      {/* Features List */}
+      {/* Features */}
       <div className="flex-1 space-y-6">
         <div className="space-y-3">
           <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
@@ -57,7 +97,10 @@ export function PlanCard({ plan, isCurrentPlan }: PlanCardProps) {
             </p>
             <ul className="space-y-3">
               {plan.limitations.map((limitation, i) => (
-                <li key={i} className="flex items-start gap-3 text-sm md:text-base text-muted-foreground">
+                <li
+                  key={i}
+                  className="flex items-start gap-3 text-sm md:text-base text-muted-foreground"
+                >
                   <X className="w-5 h-5 text-muted-foreground/50 shrink-0 mt-0.5" />
                   <span>{limitation}</span>
                 </li>
@@ -66,6 +109,26 @@ export function PlanCard({ plan, isCurrentPlan }: PlanCardProps) {
           </div>
         )}
       </div>
+
+      {/* CTA */}
+      {showCTA && (
+        <div className="mt-8 pt-6 border-t border-border/40 space-y-2">
+          <button
+            onClick={handleSubscribe}
+            disabled={loading}
+            className={cn(
+              'w-full inline-flex items-center justify-center gap-2',
+              'h-11 px-6 rounded-xl text-sm font-medium transition-colors',
+              'bg-primary text-primary-foreground hover:bg-primary/90',
+              'disabled:opacity-60 disabled:cursor-not-allowed'
+            )}
+          >
+            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {loading ? 'Redirecting…' : 'Subscribe'}
+          </button>
+          {error && <p className="text-xs text-red-500 text-center">{error}</p>}
+        </div>
+      )}
     </div>
   );
 }

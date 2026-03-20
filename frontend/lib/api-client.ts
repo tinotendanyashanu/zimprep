@@ -1,47 +1,16 @@
 /**
- * Centralized API Client for ZimPrep Frontend
- * 
- * RULES:
- * - All backend communication goes through executePipeline()
- * - No direct feature endpoint calls
- * - Consistent error handling (401/403/500)
- * - Every response must have trace_id
+ * Typed API client for the ZimPrep backend.
+ * All calls go through /api/* which Next.js rewrites to the FastAPI server.
  */
+import { supabase } from './supabase';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
-// ============================================================================
-// TYPES
-// ============================================================================
-
-export interface PipelineResponse {
-  trace_id: string;
-  request_id: string;
-  pipeline_name: string;
-  success: boolean;
-  engine_outputs: Record<string, any>;
-  started_at: string;
-  completed_at: string;
-  total_duration_ms: number;
-}
-
-export interface PipelineError {
-  detail: {
-    error?: string;
-    message?: string;
-    pipeline_name?: string;
-    failed_engine?: string;
-  };
-  trace_id?: string;
-}
-
-// ============================================================================
-// AUTH HELPERS (imported from ./auth.ts)
-// ============================================================================
-
-function getAuthToken(): string | null {
-  if (typeof window === 'undefined') return null;
-  return localStorage.getItem('zimprep_token');
+async function getAccessToken(): Promise<string | null> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ?? null;
 }
 
 function clearAuth(): void {
@@ -50,112 +19,252 @@ function clearAuth(): void {
   localStorage.removeItem('zimprep_user');
 }
 
-// ============================================================================
-// MAIN API FUNCTION
-// ============================================================================
+async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const token = await getAccessToken();
+  const res = await fetch(path, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(init.headers ?? {}),
+    },
+  });
 
-/**
- * Execute a backend pipeline.
- * 
- * This is the ONLY function that should be used for backend communication.
- * 
- * @param pipelineName - Name of pipeline (e.g., "exam_attempt_v1")
- * @param inputData - Pipeline-specific input data
- * @returns Pipeline execution result with trace_id
- * @throws Error with appropriate message for different error types
- */
-export async function executePipeline(
-  pipelineName: string,
-  inputData: Record<string, any>
-): Promise<PipelineResponse> {
-  const token = getAuthToken();
-
-  try {
-    const response = await fetch(`${API_URL}/api/v1/pipeline/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...(token && { Authorization: `Bearer ${token}` }),
-      },
-      body: JSON.stringify({
-        pipeline_name: pipelineName,
-        input_data: inputData,
-      }),
-    });
-
-    // Handle 401 - Unauthorized (token expired/invalid)
-    if (response.status === 401) {
-      clearAuth();
-      if (typeof window !== 'undefined') {
-        window.location.href = '/login';
-      }
-      throw new Error('Session expired. Please login again.');
-    }
-
-    // Handle 403 - Forbidden (wrong role)
-    if (response.status === 403) {
-      const errorData: PipelineError = await response.json();
-      throw new Error(errorData.detail?.message || 'Access denied. You do not have permission to access this resource.');
-    }
-
-    // Handle other errors
-    if (!response.ok) {
-      const errorData: PipelineError = await response.json();
-      const errorMessage = errorData.detail?.error || errorData.detail?.message || `Pipeline execution failed: ${response.statusText}`;
-      
-      // Include trace_id in error for debugging
-      const error = new Error(errorMessage);
-      (error as any).trace_id = errorData.trace_id;
-      (error as any).failed_engine = errorData.detail?.failed_engine;
-      
-      throw error;
-    }
-
-    const data: PipelineResponse = await response.json();
-
-    // Verify trace_id exists (required for audit)
-    if (!data.trace_id) {
-      console.error('⚠️ WARNING: Response missing trace_id. This violates audit requirements.');
-    }
-
-    return data;
-  } catch (error) {
-    // Re-throw if it's already our custom error
-    if (error instanceof Error) {
-      throw error;
-    }
-
-    // Network error or other unexpected error
-    throw new Error('Network error. Please check your connection and try again.');
+  if (res.status === 401) {
+    clearAuth();
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    throw new Error('Session expired. Please login again.');
   }
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.detail ?? `Request failed: ${res.statusText}`);
+  }
+
+  return res.json() as Promise<T>;
 }
 
-// ============================================================================
-// HEALTH CHECK HELPERS
-// ============================================================================
+/** For multipart/form-data uploads — does not set Content-Type so browser sets the boundary. */
+async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const token = await getAccessToken();
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
 
-/**
- * Check API health (no auth required)
- */
-export async function checkHealth(): Promise<{ status: string; timestamp: number }> {
-  const response = await fetch(`${API_URL}/health`);
-  
-  if (!response.ok) {
-    throw new Error('Health check failed');
+  if (res.status === 401) {
+    clearAuth();
+    if (typeof window !== 'undefined') window.location.href = '/login';
+    throw new Error('Session expired. Please login again.');
   }
-  
-  return response.json();
+
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.detail ?? `Request failed: ${res.statusText}`);
+  }
+
+  return res.json() as Promise<T>;
 }
 
-/**
- * Check API readiness (no auth required)
- */
-export async function checkReadiness(): Promise<any> {
-  const response = await fetch(`${API_URL}/readiness`);
-  
-  if (!response.ok) {
-    throw new Error('Readiness check failed');
-  }
-  
-  return response.json();
+// ---------------------------------------------------------------------------
+// Students
+// ---------------------------------------------------------------------------
+
+export interface HistoryEntry {
+  attempt_id: string;
+  subject: string;
+  paper: string;
+  year: number | null;
+  score: number;
+  total: number;
+  date: string;
+  status: string;
+  mode: string;
 }
+
+export interface Recommendation {
+  id: string;
+  type: string;
+  title: string;
+  explanation: string;
+  evidence: Record<string, unknown>;
+  action: { label: string; route: string };
+}
+
+export interface SubjectProgress {
+  subject: string;
+  level: string;
+  attempts: number;
+  average_score: number;
+  best_score: number;
+  weak_topics: string[];
+  suggested_focus: string[];
+}
+
+export interface ParentOverview {
+  student_name: string;
+  exam_level: string;
+  subjects: string[];
+  total_attempts: number;
+  last_activity: string;
+  engagement_status: string;
+}
+
+export const getStudentHistory = (studentId: string, limit = 30) =>
+  apiFetch<HistoryEntry[]>(`/api/students/${studentId}/history?limit=${limit}`);
+
+export const getStudentRecommendations = (studentId: string) =>
+  apiFetch<Recommendation[]>(`/api/students/${studentId}/recommendations`);
+
+export const getSubjectProgress = (studentId: string, subjectId: string) =>
+  apiFetch<SubjectProgress>(`/api/students/${studentId}/progress/${subjectId}`);
+
+export const getParentOverview = (parentId: string) =>
+  apiFetch<ParentOverview>(`/api/students/parent/${parentId}/overview`);
+
+// ---------------------------------------------------------------------------
+// Marking
+// ---------------------------------------------------------------------------
+
+export interface AnswerSubmission {
+  question_id: string;
+  question_text: string;
+  student_answer: string;
+  max_score: number;
+  question_type?: 'written' | 'mcq';
+  answer_image_url?: string;
+  topic?: string;
+}
+
+export interface QuestionMarkResult {
+  question_id: string;
+  score: number;
+  max_score: number;
+  correct_points: string[];
+  missing_points: string[];
+  feedback_summary: string;
+  study_references: string[];
+}
+
+export interface BatchMarkResponse {
+  attempt_id: string;
+  total_score: number;
+  total_max_score: number;
+  results: QuestionMarkResult[];
+}
+
+export const batchMark = (paperId: string, answers: AnswerSubmission[]) =>
+  apiFetch<BatchMarkResponse>('/api/mark/batch', {
+    method: 'POST',
+    body: JSON.stringify({ paper_id: paperId, answers }),
+  });
+
+export interface PracticeMarkRequest {
+  question_id: string;
+  question_text: string;
+  student_answer: string;
+  max_score: number;
+  question_type?: 'written' | 'mcq';
+  answer_image_url?: string;
+  topic?: string;
+  subject_id?: string;
+  student_id?: string;
+}
+
+export const practiceMark = (req: PracticeMarkRequest) =>
+  apiFetch<QuestionMarkResult & { attempt_id?: string }>('/api/practice/mark', {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+
+export const flagAttempt = (attemptId: string) =>
+  apiFetch<{ ok: boolean }>(`/api/attempts/${attemptId}/flag`, { method: 'POST' });
+
+// ---------------------------------------------------------------------------
+// Questions / catalog
+// ---------------------------------------------------------------------------
+
+export const getPaperQuestions = (paperId: string) =>
+  apiFetch<unknown[]>(`/api/papers/${paperId}/questions`);
+
+export const practiceNext = (subjectId: string, studentId?: string, topic?: string) => {
+  const params = new URLSearchParams({ subject_id: subjectId });
+  if (studentId) params.set('student_id', studentId);
+  if (topic) params.set('topic', topic);
+  return apiFetch<unknown>(`/api/practice/next?${params}`);
+};
+
+// ---------------------------------------------------------------------------
+// Admin
+// ---------------------------------------------------------------------------
+
+export interface AdminSubject {
+  id: string;
+  name: string;
+  level: string;
+}
+
+export interface AdminPaper {
+  id: string;
+  subject_id: string;
+  subject: AdminSubject | null;
+  year: number;
+  paper_number: number;
+  status: 'processing' | 'ready' | 'error';
+  pdf_url: string;
+  created_at: string;
+  qa_counts: { pending: number; approved: number; rejected: number };
+}
+
+export interface AdminQuestion {
+  id: string;
+  paper_id: string;
+  question_number: string;
+  sub_question: string | null;
+  section: string | null;
+  marks: number;
+  text: string;
+  question_type: 'written' | 'mcq';
+  topic_tags: string[];
+  has_image: boolean;
+  image_url: string | null;
+  qa_status: 'pending' | 'approved' | 'rejected';
+  mcq_answer: { id: string; correct_option: string }[] | null;
+}
+
+export interface AdminQuestionPatch {
+  qa_status?: 'approved' | 'rejected';
+  question_number?: string;
+  marks?: number;
+  text?: string;
+  question_type?: 'written' | 'mcq';
+  topic_tags?: string[];
+  mcq_correct_option?: 'A' | 'B' | 'C' | 'D';
+}
+
+export const adminListSubjects = () =>
+  apiFetch<AdminSubject[]>('/api/admin/subjects');
+
+export const adminListPapers = () =>
+  apiFetch<AdminPaper[]>('/api/admin/papers');
+
+export const adminUploadPaper = (formData: FormData) =>
+  apiUpload<{ paper_id: string; status: string }>('/api/admin/papers', formData);
+
+export const adminListPaperQuestions = (paperId: string, qaStatus?: string) => {
+  const params = qaStatus ? `?qa_status=${qaStatus}` : '';
+  return apiFetch<AdminQuestion[]>(`/api/admin/papers/${paperId}/questions${params}`);
+};
+
+export const adminPatchQuestion = (questionId: string, patch: AdminQuestionPatch) =>
+  apiFetch<{ ok: boolean }>(`/api/admin/questions/${questionId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(patch),
+  });
+
+export const adminDeleteQuestion = (questionId: string) =>
+  apiFetch<void>(`/api/admin/questions/${questionId}`, { method: 'DELETE' });
+
+export const adminUploadSyllabus = (formData: FormData) =>
+  apiUpload<{ chunks_inserted: number }>('/api/admin/syllabus', formData);

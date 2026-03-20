@@ -1,5 +1,11 @@
 fastapi
 uvicorn
+httpx
 motor
 pydantic-settings
 openai
+anthropic
+pymupdf
+supabase
+python-multipart
+google-cloud-vision
