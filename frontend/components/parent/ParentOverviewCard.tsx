@@ -2,7 +2,7 @@ import React from 'react';
 import { Badge } from "@/components/ui/badge";
 import { Activity, BookOpen, Layers, Zap } from 'lucide-react';
 
-export type EngagementStatus = "CONSISTENT" | "IMPROVING" | "INCONSISTENT";
+export type EngagementStatus = "CONSISTENT" | "IMPROVING" | "INCONSISTENT" | "NOT STARTED";
 
 export interface ParentOverviewData {
   student_name: string;

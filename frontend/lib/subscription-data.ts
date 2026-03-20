@@ -50,6 +50,12 @@ export const PLANS: SubscriptionPlan[] = [
   },
 ];
 
+export const MOCK_USER_SUBSCRIPTION: SubscriptionStatus = {
+  plan_id: 'free',
+  tier: 'free',
+  is_active: true,
+};
+
 export function getPlanByTier(tier: string): SubscriptionPlan {
   return PLANS.find((p) => p.tier === tier) ?? PLANS[0];
 }

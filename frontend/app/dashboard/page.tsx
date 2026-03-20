@@ -128,7 +128,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="space-y-3">
                     {data.recent_exams.map((exam) => (
-                        <div key={exam.exam_id} className="flex items-center justify-between p-4 bg-white border border-zinc-200 rounded-xl hover:border-zinc-300 transition-all cursor-pointer" onClick={() => router.push(`/results/${exam.trace_id || exam.exam_id}`)}>
+                        <div key={exam.exam_id} className="flex items-center justify-between p-4 bg-white border border-zinc-200 rounded-xl hover:border-zinc-300 transition-all cursor-pointer" onClick={() => router.push(`/results/${exam.exam_id}`)}>
                             <div className="flex items-center gap-4">
                                 <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white ${
                                     exam.grade === 'A' ? 'bg-zinc-900' : 'bg-zinc-400'

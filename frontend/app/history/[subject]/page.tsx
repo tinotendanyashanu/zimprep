@@ -19,7 +19,7 @@ export default async function SubjectHistoryPage({ params }: PageProps) {
   }
 
   const decodedSubject = decodeURIComponent(subject);
-  const progress = getSubjectProgress(decodedSubject);
+  const progress = await getSubjectProgress('', decodedSubject);
 
   return (
     <div className="min-h-screen bg-gray-50/50">
