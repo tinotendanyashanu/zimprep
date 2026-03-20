@@ -21,7 +21,11 @@ class Settings(BaseSettings):
     billing_webhook_secret: str = ""  # must match the "verif-hash" in Flutterwave dashboard
 
     # CORS — comma-separated list of allowed origins
+    # e.g. "https://zimprep.vercel.app,http://localhost:3000"
     cors_origins: str = "http://localhost:3000"
+
+    # Server
+    port: int = 8000
 
     # Auth / misc (accepted from .env but not used by the app directly)
     jwt_secret: str = ""
