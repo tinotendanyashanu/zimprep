@@ -10,6 +10,6 @@ export const supabase = new Proxy({} as ReturnType<typeof createClient>, {
       if (!url || !key) throw new Error('Supabase env vars are not set.');
       _supabase = createClient(url, key);
     }
-    return (_supabase as Record<string | symbol, unknown>)[prop];
+    return (_supabase as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
