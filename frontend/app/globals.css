@@ -28,35 +28,35 @@
 }
 
 :root {
-  --radius: 0.75rem;
+  --radius: 1.25rem;
   
-  /* Apple/Square-inspired Light Mode (Default) */
-  --background: #FFFFFF;
-  --foreground: #1D1D1F; /* Deep charcoal, not black */
+  /* Bright & Playful Light Mode */
+  --background: #F8FAFC; /* Softer, slightly cool background instead of pure white */
+  --foreground: #1e293b; /* Deep slate, readable but softer than black */
   
-  --card: #F5F5F7; /* Apple's light gray secondary background */
-  --card-foreground: #1D1D1F;
+  --card: #FFFFFF; /* Pure white for contrast against background */
+  --card-foreground: #1e293b;
   
   --primary: #00875F; /* Refined ZimPrep Green - Deep & Corporate */
   --primary-foreground: #FFFFFF;
   
-  --secondary: #F5F5F7;
-  --secondary-foreground: #1D1D1F;
+  --secondary: #e2e8f0;
+  --secondary-foreground: #0f172a;
   
-  --muted: #F5F5F7;
-  --muted-foreground: #86868B; /* Apple's body text gray */
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b; 
   
-  --accent: #00875F;
+  --accent: #10b981; /* Brighter green for accents/success */
   --accent-foreground: #FFFFFF;
   
-  --border: #D2D2D7;
-  --input: #E5E5E5;
+  --border: #e2e8f0;
+  --input: #e2e8f0;
   --ring: #00875F;
 }
 
 /* Optional Dark Mode - Radical Minimalism */
 .dark {
-  --background: #000000;
+  --background: #0f172a;
   --foreground: #F5F5F7;
   
   --card: #1D1D1F;

@@ -52,16 +52,17 @@ function MCQSimple({
   onChange: (v: string) => void;
 }) {
   return (
-    <div className="grid grid-cols-2 gap-3">
+    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
       {["A", "B", "C", "D"].map((opt) => (
         <label
           key={opt}
           className={cn(
-            "flex items-center gap-3 p-4 rounded-lg border-2 cursor-pointer transition-all",
+            "flex items-center gap-4 p-5 rounded-2xl border-4 cursor-pointer transition-all active:translate-y-1",
             value === opt
-              ? "border-zinc-900 bg-zinc-900 text-white"
-              : "border-zinc-200 bg-white hover:border-zinc-400"
+              ? "border-primary bg-primary/10 shadow-sm"
+              : "border-border border-b-[6px] bg-card hover:bg-secondary/50 hover:border-border/80 text-foreground"
           )}
+          style={{ borderBottomWidth: value === opt ? '4px' : undefined }}
         >
           <input
             type="radio"
@@ -73,18 +74,18 @@ function MCQSimple({
           />
           <span
             className={cn(
-              "w-8 h-8 rounded-full border-2 flex items-center justify-center font-bold text-sm flex-shrink-0",
+              "w-10 h-10 rounded-xl border-2 flex items-center justify-center font-black text-base flex-shrink-0 shadow-sm",
               value === opt
-                ? "border-white text-white"
-                : "border-zinc-400 text-zinc-600"
+                ? "border-primary bg-primary text-white"
+                : "border-border text-muted-foreground bg-secondary"
             )}
           >
             {opt}
           </span>
           <span
             className={cn(
-              "font-medium",
-              value === opt ? "text-white" : "text-zinc-700"
+              "font-bold text-lg",
+              value === opt ? "text-primary" : "text-foreground"
             )}
           >
             {opt}
@@ -230,36 +231,36 @@ export default function PracticePage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen bg-background pb-32">
       {/* Header */}
-      <header className="h-14 border-b bg-white flex items-center justify-between px-6 sticky top-0 z-10">
-        <div className="flex items-center gap-4">
+      <header className="h-20 border-b-4 border-border bg-card flex items-center justify-between px-6 sticky top-0 z-10 shadow-sm">
+        <div className="flex items-center gap-6 flex-1">
           <Link
             href="/dashboard"
-            className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-900 text-sm"
+            className="w-10 h-10 rounded-xl border-2 border-border flex items-center justify-center text-muted-foreground hover:bg-secondary hover:text-foreground transition-all hover:shadow-gamified hover:-translate-y-0.5 active:translate-y-0 shadow-sm block"
           >
-            <ArrowLeft className="w-4 h-4" /> Back
+            <ArrowLeft className="w-5 h-5 mx-auto" />
           </Link>
-          <span className="text-sm font-semibold text-zinc-900">
-            {subjectName} — Practice Mode
-          </span>
+          {/* Progress Bar Header */}
+          <div className="flex-1 max-w-xl hidden sm:block">
+             <div className="h-4 w-full bg-secondary border-2 border-border/50 rounded-full overflow-hidden shadow-inner p-0.5 relative">
+                <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${sessionMax > 0 ? (sessionScore / sessionMax) * 100 : 0}%` }} />
+             </div>
+          </div>
         </div>
         <div className="flex items-center gap-4">
           {sessionMax > 0 && (
-            <span className="text-sm text-zinc-500">
-              Session:{" "}
-              <span className="font-bold text-zinc-900">
-                {sessionScore}/{sessionMax}
-              </span>{" "}
-              ({questionCount} questions)
-            </span>
+            <div className="flex items-center gap-2 bg-secondary border-2 border-border px-4 py-2 rounded-xl shadow-sm">
+              <span className="text-xs font-black uppercase tracking-wider text-muted-foreground">Session</span>
+              <span className="text-base font-black text-primary">{Math.round((sessionScore/sessionMax)*100)}%</span>
+            </div>
           )}
           {/* Topic filter */}
           {allTopics.length > 0 && (
             <select
               value={topicFilter}
               onChange={(e) => setTopicFilter(e.target.value)}
-              className="text-xs border border-zinc-200 rounded-md px-2 py-1 bg-white text-zinc-700"
+              className="text-sm font-bold border-2 border-border rounded-xl px-3 py-2 bg-card text-foreground focus:ring-2 focus:ring-primary outline-none shadow-sm cursor-pointer"
             >
               <option value="">All Topics</option>
               {allTopics.map((t) => (
@@ -272,7 +273,7 @@ export default function PracticePage() {
         </div>
       </header>
 
-      <div className="max-w-2xl mx-auto px-6 py-8 space-y-6">
+      <div className="max-w-3xl mx-auto px-6 py-10 space-y-8">
         {/* Loading */}
         {status === "loading" && (
           <div className="flex items-center justify-center py-20">
@@ -294,31 +295,36 @@ export default function PracticePage() {
         {/* Answering */}
         {(status === "answering" || status === "submitting") && question && (
           <>
-            <div className="bg-white border border-zinc-200 rounded-xl p-6 shadow-sm">
-              <div className="flex items-start justify-between mb-4 pb-4 border-b border-zinc-100">
-                <div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-                    Question {question.question_number}
+            <div className="bg-card border-4 border-border rounded-3xl p-8 shadow-gamified">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-6 border-b-2 border-border/50">
+                <div className="flex items-center gap-3">
+                  <span className="w-10 h-10 rounded-2xl bg-secondary flex items-center justify-center font-black text-muted-foreground border-2 border-border/50 shadow-sm">
+                    Q
                   </span>
-                  {question.topic_tags?.[0] && (
-                    <span className="ml-2 text-xs text-zinc-400">
-                      — {question.topic_tags[0]}
-                    </span>
-                  )}
+                  <div>
+                      <h2 className="text-lg font-black text-foreground uppercase tracking-wide">
+                        Question {question.question_number}
+                      </h2>
+                      {question.topic_tags?.[0] && (
+                        <span className="text-xs font-bold text-muted-foreground">
+                          {question.topic_tags[0]}
+                        </span>
+                      )}
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-3">
                   {question.question_type === "mcq" && (
-                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-medium">
+                    <span className="bg-blue-100 text-blue-700 border-2 border-blue-200 px-3 py-1 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm">
                       MCQ
                     </span>
                   )}
-                  <span className="bg-zinc-100 text-zinc-600 px-2 py-0.5 rounded text-xs font-medium">
+                  <span className="bg-accent/10 text-accent border-2 border-accent/20 px-3 py-1 rounded-xl text-xs font-black uppercase tracking-widest shadow-sm">
                     {question.marks} {question.marks === 1 ? "Mark" : "Marks"}
                   </span>
                 </div>
               </div>
               {question.has_image && question.image_url && (
-                <div className="mb-4 rounded-md overflow-hidden border border-zinc-200">
+                <div className="mb-6 rounded-2xl overflow-hidden border-2 border-border shadow-sm">
                   <img
                     src={question.image_url}
                     alt="Question diagram"
@@ -327,36 +333,37 @@ export default function PracticePage() {
                 </div>
               )}
               <div
-                className="prose prose-zinc max-w-none prose-p:leading-relaxed"
+                className="text-xl md:text-2xl font-semibold leading-relaxed text-foreground"
                 dangerouslySetInnerHTML={{ __html: question.text }}
               />
             </div>
 
-            <div className="bg-white border border-zinc-200 rounded-xl p-6 shadow-sm">
-              <p className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-4">
+            <div className="my-8">
+              <h3 className="text-lg font-black uppercase tracking-widest text-muted-foreground mb-6 flex items-center gap-3">
+                <div className="w-2 h-6 bg-orange-400 rounded-full"></div>
                 Your Answer
-              </p>
+              </h3>
               {question.question_type === "mcq" ? (
                 <MCQSimple value={answer} onChange={setAnswer} />
               ) : (
-                <div className="space-y-2">
+                <div className="space-y-3">
                   <textarea
-                    className="w-full min-h-[180px] p-4 border border-zinc-200 rounded-lg font-serif text-base leading-relaxed focus:border-zinc-900 focus:ring-1 focus:ring-zinc-900 outline-none resize-none"
-                    placeholder="Write your answer here…"
+                    className="w-full min-h-[220px] p-6 border-4 border-border rounded-3xl font-medium text-lg leading-relaxed focus:border-primary focus:ring-4 focus:ring-primary/20 outline-none resize-none shadow-gamified"
+                    placeholder="Type your answer here..."
                     value={answer}
                     onChange={(e) => setAnswer(e.target.value)}
                     disabled={status === "submitting"}
                   />
-                  <div className="flex justify-between text-xs text-zinc-400">
+                  <div className="flex justify-between text-sm font-bold text-muted-foreground px-4">
                     <span
                       className={cn(
                         answer.length > 0 && answer.length < MIN_ANSWER_CHARS
-                          ? "text-amber-500"
+                          ? "text-orange-500"
                           : ""
                       )}
                     >
                       {answer.length > 0 && answer.length < MIN_ANSWER_CHARS
-                        ? `Min. ${MIN_ANSWER_CHARS} characters required (${answer.length}/${MIN_ANSWER_CHARS})`
+                        ? `Need ${MIN_ANSWER_CHARS - answer.length} more chars`
                         : `${answer.split(/\s+/).filter(Boolean).length} words`}
                     </span>
                   </div>
@@ -364,74 +371,57 @@ export default function PracticePage() {
               )}
             </div>
 
-            <Button
-              className="w-full bg-zinc-900 hover:bg-zinc-800 text-white gap-2"
-              disabled={
-                status === "submitting" ||
-                !answer ||
-                (question.question_type === "written" &&
-                  answer.length < MIN_ANSWER_CHARS)
-              }
-              onClick={submitAnswer}
-            >
-              {status === "submitting" ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" /> Claude is
-                  marking…
-                </>
-              ) : (
-                <>
-                  Mark This Answer <ChevronRight className="w-4 h-4" />
-                </>
-              )}
-            </Button>
+// removed normal button and substituted with fixed bottom bar below
           </>
         )}
 
         {/* Reviewing */}
         {status === "reviewing" && question && result && (
-          <>
+          <div className="animate-in slide-in-from-bottom-4 duration-500">
             <div
               className={cn(
-                "bg-white border-2 rounded-xl p-6 shadow-sm",
+                "bg-card border-4 rounded-3xl p-8 shadow-gamified mb-24",
                 pct >= 1
-                  ? "border-green-200"
+                  ? "border-green-400"
                   : pct >= 0.5
-                  ? "border-amber-200"
-                  : "border-red-200"
+                  ? "border-amber-400"
+                  : "border-red-400"
               )}
             >
-              <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center justify-between mb-6 pb-6 border-b-2 border-border/50">
                 <div>
-                  <p className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-1">
-                    Question {question.question_number}
+                  <p className="text-sm font-black uppercase tracking-widest text-muted-foreground mb-2">
+                    Marking Result
                   </p>
-                  <p className="text-sm text-zinc-600">
+                  <p className="text-base font-bold text-foreground">
                     {question.topic_tags?.[0]}
                   </p>
                 </div>
-                <div className={cn("text-3xl font-black", scoreColor)}>
+                <div className={cn("text-5xl font-black drop-shadow-sm", scoreColor)}>
                   {result.score}
-                  <span className="text-lg font-medium text-zinc-400">
+                  <span className="text-2xl font-bold text-muted-foreground ml-1">
                     /{result.max_score}
                   </span>
                 </div>
               </div>
-              <p className="text-sm text-zinc-700 leading-relaxed mb-4 italic border-l-4 border-zinc-200 pl-4">
-                {result.feedback_summary}
-              </p>
+              
+              <div className="bg-secondary/50 rounded-2xl p-6 mb-6 border-2 border-border/50">
+                 <p className="text-lg font-medium text-foreground leading-relaxed italic">
+                   "{result.feedback_summary}"
+                 </p>
+              </div>
+
               {result.correct_points.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-green-700 mb-2">
-                    Correct
+                <div className="mb-6">
+                  <p className="text-sm font-black uppercase tracking-widest text-green-600 mb-3 flex items-center gap-2">
+                    <CheckCircle2 className="w-5 h-5" /> What you got right
                   </p>
-                  <ul className="space-y-1">
+                  <ul className="space-y-2">
                     {result.correct_points.map((p, i) => (
                       <li
                         key={i}
-                        className="flex items-start gap-2 text-sm text-green-800"
+                        className="flex items-start gap-3 text-base font-medium text-green-800 bg-green-50 p-3 rounded-xl border-2 border-green-100"
                       >
-                        <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5 text-green-500" />{" "}
                         {p}
                       </li>
                     ))}
@@ -439,17 +429,16 @@ export default function PracticePage() {
                 </div>
               )}
               {result.missing_points.length > 0 && (
-                <div className="mb-3">
-                  <p className="text-xs font-bold uppercase tracking-wider text-red-700 mb-2">
-                    Missing
+                <div className="mb-6">
+                  <p className="text-sm font-black uppercase tracking-widest text-red-600 mb-3 flex items-center gap-2">
+                    <XCircle className="w-5 h-5" /> What you missed
                   </p>
-                  <ul className="space-y-1">
+                  <ul className="space-y-2">
                     {result.missing_points.map((p, i) => (
                       <li
                         key={i}
-                        className="flex items-start gap-2 text-sm text-red-800"
+                        className="flex items-start gap-3 text-base font-medium text-red-800 bg-red-50 p-3 rounded-xl border-2 border-red-100"
                       >
-                        <XCircle className="w-4 h-4 shrink-0 mt-0.5 text-red-500" />{" "}
                         {p}
                       </li>
                     ))}
@@ -457,13 +446,13 @@ export default function PracticePage() {
                 </div>
               )}
               {result.study_references.length > 0 && (
-                <div className="mt-4 pt-4 border-t border-zinc-100">
-                  <p className="text-xs font-bold uppercase tracking-wider text-zinc-400 mb-2 flex items-center gap-1">
-                    <BookOpen className="w-3 h-3" /> Study References
+                <div className="mt-8 pt-6 border-t-2 border-border/50">
+                  <p className="text-sm font-black uppercase tracking-widest text-muted-foreground mb-4 flex items-center gap-2">
+                    <BookOpen className="w-5 h-5" /> Study References
                   </p>
-                  <ul className="space-y-0.5">
+                  <ul className="space-y-2">
                     {result.study_references.map((r, i) => (
-                      <li key={i} className="text-xs text-zinc-500">
+                      <li key={i} className="text-sm font-bold text-primary bg-primary/10 p-3 rounded-xl border-2 border-primary/20 inline-block mr-2 mb-2">
                         {r}
                       </li>
                     ))}
@@ -471,31 +460,66 @@ export default function PracticePage() {
                 </div>
               )}
             </div>
-
-            <div className="flex items-center gap-3">
-              <Button
-                variant="outline"
-                size="sm"
-                className={cn(
-                  "gap-2 text-zinc-500",
-                  flagged && "text-amber-600 border-amber-300 bg-amber-50"
-                )}
-                onClick={flagAnswer}
-                disabled={flagged}
-              >
-                <Flag className="w-4 h-4" />
-                {flagged ? "Flagged for Review" : "Flag Incorrect Marking"}
-              </Button>
-              <Button
-                className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white gap-2"
-                onClick={loadQuestion}
-              >
-                Next Question <ChevronRight className="w-4 h-4" />
-              </Button>
-            </div>
-          </>
+          </div>
         )}
       </div>
+
+      {/* Global Bottom Check Bar */}
+      {(status === "answering" || status === "submitting" || status === "reviewing") && (
+          <div className="fixed bottom-0 inset-x-0 border-t-4 border-border bg-card p-4 sm:p-6 z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
+              <div className="max-w-3xl mx-auto flex items-center justify-between">
+                  <div className="hidden sm:block">
+                      <p className="text-2xl font-black text-foreground tracking-tight">
+                          {status === "reviewing" ? (pct >= 1 ? "Awesome job!" : pct >= 0.5 ? "Good effort!" : "Keep practicing!") : "Ready to submit?"}
+                      </p>
+                  </div>
+                  
+                  {status === "reviewing" ? (
+                      <div className="flex gap-4 w-full sm:w-auto">
+                          <Button
+                              variant="outline"
+                              size="lg"
+                              className={cn(
+                                  "gap-2 w-full sm:w-auto border-2 h-14 rounded-2xl font-bold text-base bg-card hover:bg-secondary text-foreground",
+                                  flagged ? "text-orange-600 border-orange-300 bg-orange-50" : "border-border"
+                              )}
+                              onClick={flagAnswer}
+                              disabled={flagged}
+                          >
+                              <Flag className="w-5 h-5" />
+                              {flagged ? "Flagged" : "Report"}
+                          </Button>
+                          <Button
+                              size="lg"
+                              className="w-full sm:w-auto text-lg px-12 font-black uppercase tracking-widest h-14 rounded-2xl shadow-gamified active:translate-y-1 active:shadow-sm transition-all"
+                              onClick={loadQuestion}
+                          >
+                              Continue
+                          </Button>
+                      </div>
+                  ) : (
+                      <Button
+                          size="lg"
+                          className="w-full sm:w-auto text-lg px-12 font-black uppercase tracking-widest h-14 rounded-2xl shadow-gamified active:translate-y-1 active:shadow-sm transition-all"
+                          disabled={
+                              status === "submitting" ||
+                              !answer ||
+                              (question?.question_type === "written" && answer.length < MIN_ANSWER_CHARS)
+                          }
+                          onClick={submitAnswer}
+                      >
+                          {status === "submitting" ? (
+                              <>
+                                  <Loader2 className="w-6 h-6 animate-spin mr-3" /> Marking...
+                              </>
+                          ) : (
+                              "Check"
+                          )}
+                      </Button>
+                  )}
+              </div>
+          </div>
+      )}
     </div>
   );
 }

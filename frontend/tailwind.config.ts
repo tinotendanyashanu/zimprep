@@ -32,6 +32,11 @@ const config = {
         "2xl": "calc(var(--radius) + 8px)",
         "3xl": "calc(var(--radius) + 12px)",
       },
+      boxShadow: {
+        'gamified': '0 4px 0 0 rgba(0, 0, 0, 0.1), 0 2px 4px rgba(0, 0, 0, 0.05)',
+        'gamified-lg': '0 6px 0 0 rgba(0, 0, 0, 0.1), 0 4px 6px rgba(0, 0, 0, 0.05)',
+        'gamified-active': '0 0px 0 0 rgba(0, 0, 0, 0), 0 2px 2px rgba(0, 0, 0, 0.05)',
+      }
     },
   },
   plugins: [],

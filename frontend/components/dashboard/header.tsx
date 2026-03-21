@@ -37,12 +37,17 @@ export function DashboardHeader({ title = "ZimPrep" }: DashboardHeaderProps) {
   });
 
   return (
-    <header className="h-16 border-b border-zinc-200 bg-white/80 backdrop-blur-md px-6 flex items-center justify-between sticky top-0 z-50">
+    <header className="h-20 border-b-4 border-border bg-card px-6 flex items-center justify-between sticky top-0 z-50 shadow-sm">
       <div className="flex items-center gap-8">
-        <div className="font-bold text-xl text-primary">{title}</div>
+        <div className="font-extrabold text-2xl tracking-tight text-primary flex items-center gap-2">
+           <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center rotate-3">
+             <BookOpen className="w-5 h-5 text-white -rotate-3" />
+           </div>
+           {title}
+        </div>
         
         {/* Role-aware navigation */}
-        <nav className="hidden md:flex items-center gap-1">
+        <nav className="hidden md:flex items-center gap-4 ml-6">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -51,13 +56,13 @@ export function DashboardHeader({ title = "ZimPrep" }: DashboardHeaderProps) {
                 key={item.href} 
                 href={item.href}
                 className={cn(
-                  "flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-colors",
+                  "flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold uppercase tracking-wide transition-all border-2",
                   isActive 
-                    ? "bg-zinc-100 text-zinc-900" 
-                    : "text-zinc-600 hover:text-zinc-900 hover:bg-zinc-50"
+                    ? "bg-primary/10 text-primary border-primary/20 shadow-sm" 
+                    : "border-transparent text-muted-foreground hover:text-foreground hover:bg-secondary/50 hover:border-border"
                 )}
               >
-                <Icon className="w-4 h-4" />
+                <Icon className={cn("w-5 h-5", isActive ? "text-primary" : "text-muted-foreground")} />
                 {item.label}
               </Link>
             );
@@ -68,15 +73,15 @@ export function DashboardHeader({ title = "ZimPrep" }: DashboardHeaderProps) {
       <div className="flex items-center gap-4">
         {/* Role indicator (dev only) */}
         {identity && (
-          <span className="hidden sm:inline-flex text-xs font-medium text-muted-foreground bg-muted px-2 py-1 rounded">
+          <span className="hidden sm:inline-flex text-[10px] font-black uppercase tracking-wider text-muted-foreground bg-muted border-2 border-border px-3 py-1.5 rounded-xl">
             {identity.role}
           </span>
         )}
-        <div className="w-8 h-8 rounded-full bg-zinc-100 flex items-center justify-center text-xs font-bold text-zinc-500 border border-zinc-200">
-           <User className="w-4 h-4" />
+        <div className="w-10 h-10 rounded-2xl bg-secondary flex items-center justify-center text-xs font-bold text-foreground border-2 border-border shadow-sm">
+           <User className="w-5 h-5" />
         </div>
-        <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout">
-          <LogOut className="w-4 h-4 text-muted-foreground hover:text-red-500" />
+        <Button variant="ghost" size="icon" className="rounded-xl border-2 border-transparent hover:border-red-200 hover:bg-red-50 hover:text-red-500 text-muted-foreground" onClick={handleLogout} title="Logout">
+          <LogOut className="w-5 h-5" />
         </Button>
       </div>
     </header>

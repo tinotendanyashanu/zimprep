@@ -20,39 +20,39 @@ export function SubjectCard({ subject }: SubjectCardProps) {
 
   return (
     <Card 
-        className="p-6 rounded-3xl border-border hover:border-primary/50 transition-all cursor-pointer group bg-white relative overflow-hidden"
+        className="p-6 rounded-[2rem] border-4 border-border shadow-gamified hover:shadow-gamified-lg hover:border-primary/30 transition-all cursor-pointer group bg-card hover:-translate-y-1 active:translate-y-0 active:shadow-sm relative overflow-hidden flex flex-col justify-between"
         onClick={() => router.push(`/subjects/${encodeURIComponent(subject)}`)}
     >
       <div className="flex justify-between items-start mb-6">
-          <div className="p-3 bg-zinc-100 rounded-xl group-hover:bg-primary/10 transition-colors">
-             <BookOpen className="w-6 h-6 text-zinc-500 group-hover:text-primary" />
+          <div className="p-4 bg-secondary rounded-2xl group-hover:scale-110 group-hover:bg-primary/20 transition-all shadow-sm border-2 border-border/50">
+             <BookOpen className="w-7 h-7 text-muted-foreground group-hover:text-primary transition-colors" />
           </div>
-          <span className="text-xs font-medium px-2.5 py-1 bg-zinc-100 rounded-full text-zinc-600">
+          <span className="text-xs font-black px-3 py-1.5 bg-accent/10 border-2 border-accent/20 rounded-xl text-accent uppercase tracking-wider">
             {paperCount} Papers
           </span>
       </div>
       
-      <div className="mb-4">
-        <h4 className="text-xl font-bold mb-1 group-hover:text-primary transition-colors">{subject}</h4>
-        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <Clock className="w-3.5 h-3.5" />
+      <div className="mb-6">
+        <h4 className="text-2xl font-black text-foreground mb-2 group-hover:text-primary transition-colors tracking-tight">{subject}</h4>
+        <div className="flex items-center gap-2 text-sm font-bold text-muted-foreground">
+            <Clock className="w-4 h-4 text-orange-400" />
             <span>0 hrs studied</span>
         </div>
       </div>
 
-      <div className="space-y-2">
-         <div className="flex justify-between text-xs text-muted-foreground">
+      <div className="space-y-3">
+         <div className="flex justify-between font-bold text-xs text-muted-foreground uppercase tracking-wider">
             <span>Progress</span>
-            <span>{progress}%</span>
+            <span className="text-foreground">{progress}%</span>
          </div>
-         <div className="h-1.5 w-full bg-zinc-100 rounded-full overflow-hidden">
-            <div className="h-full bg-primary/80 rounded-full" style={{ width: `${progress}%` }} />
+         <div className="h-4 w-full bg-secondary border-2 border-border/50 rounded-full overflow-hidden shadow-inner p-0.5">
+            <div className="h-full bg-primary rounded-full transition-all duration-1000" style={{ width: `${progress}%` }} />
          </div>
       </div>
 
-      <div className="mt-6 pt-4 border-t border-zinc-100 flex justify-end">
-          <Button variant="ghost" size="sm" className="text-primary hover:text-primary hover:bg-primary/5 gap-1 p-0 h-auto font-medium">
-             Continue <ChevronRight className="w-4 h-4" />
+      <div className="mt-8 flex justify-end">
+          <Button variant="secondary" size="sm" className="w-full text-foreground gap-1 border-border/50 font-bold group-hover:bg-primary group-hover:text-white group-hover:border-primary shadow-sm h-12">
+             Continue <ChevronRight className="w-5 h-5" />
           </Button>
       </div>
     </Card>

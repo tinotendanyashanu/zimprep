@@ -52,15 +52,15 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50/50">
-      <DashboardHeader />
+    <div className="min-h-screen bg-background">
+      <DashboardHeader title="ZimPrep" />
       
       <main className="max-w-7xl mx-auto p-6 md:p-12 space-y-12 animate-in fade-in duration-500 delay-100">
         
         {/* Welcome Section */}
-        <div className="space-y-4">
-           <h1 className="text-calm-h2">Overview</h1>
-           <p className="text-calm-body text-base max-w-2xl">
+        <div className="space-y-2">
+           <h1 className="text-4xl md:text-5xl font-black tracking-tight text-foreground">Overview</h1>
+           <p className="text-lg text-muted-foreground font-medium max-w-2xl">
               Track your progress and focus on areas that need improvement.
            </p>
         </div>
@@ -71,17 +71,17 @@ export default function DashboardPage() {
                 <h3 className="text-calm-h3">Recommended Focus</h3>
                 <div className="grid md:grid-cols-2 gap-4">
                     {data.recommendations.map((rec, i) => (
-                        <div key={i} className="bg-emerald-50/50 border border-emerald-100 p-6 rounded-2xl transition-all hover:bg-emerald-50">
-                            <div className="flex items-start justify-between mb-2">
-                                <h4 className="font-bold text-emerald-900">{rec.topic}</h4>
-                                <span className="px-2 py-0.5 rounded-full bg-emerald-200 text-emerald-800 text-[10px] font-bold uppercase tracking-wide">
+                        <div key={i} className="bg-emerald-100 border-2 border-emerald-300 p-6 rounded-2xl transition-all hover:bg-emerald-200 hover:shadow-gamified cursor-pointer shadow-sm">
+                            <div className="flex items-start justify-between mb-3">
+                                <h4 className="font-extrabold text-emerald-900 text-lg">{rec.topic}</h4>
+                                <span className="px-3 py-1 rounded-xl bg-orange-400 text-white text-[10px] font-black uppercase tracking-widest shadow-sm">
                                     Priority
                                 </span>
                             </div>
-                            <p className="text-emerald-700 text-sm mb-4">{rec.reason}</p>
-                            <div className="flex gap-2">
+                            <p className="text-emerald-800 text-sm mb-5 font-medium">{rec.reason}</p>
+                            <div className="flex gap-2 flex-wrap">
                                 {rec.resources.map((res, j) => (
-                                    <span key={j} className="text-xs bg-white text-emerald-600 px-2 py-1 rounded border border-emerald-100">
+                                    <span key={j} className="text-xs font-bold bg-white text-emerald-700 px-3 py-1.5 rounded-xl border-2 border-emerald-200 shadow-sm">
                                         {res}
                                     </span>
                                 ))}
@@ -95,21 +95,21 @@ export default function DashboardPage() {
         {/* Performance Overview */}
         {data?.performance && (
             <div>
-                 <h3 className="text-calm-h3 mb-6">Performance</h3>
+                 <h3 className="text-2xl font-black text-foreground mb-6 flex items-center gap-2"><div className="w-3 h-8 bg-blue-500 rounded-full"></div> Performance</h3>
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    <div className="bg-white p-6 rounded-3xl border border-zinc-200 shadow-sm">
-                        <p className="text-sm text-zinc-500 uppercase tracking-widest font-semibold mb-2">Average Grade</p>
-                        <div className="text-5xl font-serif text-zinc-900">{data.performance.average_grade}</div>
+                    <div className="bg-card p-6 rounded-2xl border-2 border-border shadow-gamified hover:shadow-gamified-lg transition-all">
+                        <p className="text-xs text-muted-foreground uppercase tracking-widest font-black mb-3">Average Grade</p>
+                        <div className="text-6xl font-black text-primary drop-shadow-sm">{data.performance.average_grade}</div>
                     </div>
-                     <div className="bg-white p-6 rounded-3xl border border-zinc-200 shadow-sm">
-                        <p className="text-sm text-zinc-500 uppercase tracking-widest font-semibold mb-2">Trend</p>
+                     <div className="bg-card p-6 rounded-2xl border-2 border-border shadow-gamified hover:shadow-gamified-lg transition-all">
+                        <p className="text-xs text-muted-foreground uppercase tracking-widest font-black mb-3">Trend</p>
                         <div className="flex items-center gap-2">
-                            <span className={`text-lg font-medium ${
-                                data.performance.improvement_trend === 'up' ? 'text-green-600' : 
-                                data.performance.improvement_trend === 'down' ? 'text-red-600' : 'text-zinc-600'
+                            <span className={`text-2xl font-black ${
+                                data.performance.improvement_trend === 'up' ? 'text-accent' : 
+                                data.performance.improvement_trend === 'down' ? 'text-destructive' : 'text-zinc-400'
                             }`}>
-                                {data.performance.improvement_trend === 'up' ? 'Improving' : 
-                                 data.performance.improvement_trend === 'down' ? 'Declining' : 'Stable'}
+                                {data.performance.improvement_trend === 'up' ? '↗ Improving' : 
+                                 data.performance.improvement_trend === 'down' ? '↘ Declining' : '→ Stable'}
                             </span>
                         </div>
                     </div>
@@ -121,27 +121,27 @@ export default function DashboardPage() {
         {data?.recent_exams && data.recent_exams.length > 0 && (
             <div>
                  <div className="flex items-center justify-between mb-6">
-                    <h3 className="text-calm-h3">Recent Activity</h3>
+                    <h3 className="text-2xl font-black text-foreground flex items-center gap-2"><div className="w-3 h-8 bg-orange-400 rounded-full"></div> Recent Activity</h3>
                     <Button variant="outline" size="sm" onClick={() => router.push('/history')}>
                         View All
                     </Button>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-4">
                     {data.recent_exams.map((exam) => (
-                        <div key={exam.exam_id} className="flex items-center justify-between p-4 bg-white border border-zinc-200 rounded-xl hover:border-zinc-300 transition-all cursor-pointer" onClick={() => router.push(`/results/${exam.exam_id}`)}>
-                            <div className="flex items-center gap-4">
-                                <div className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold text-white ${
-                                    exam.grade === 'A' ? 'bg-zinc-900' : 'bg-zinc-400'
+                        <div key={exam.exam_id} className="flex items-center justify-between p-5 bg-card border-2 border-border shadow-sm rounded-2xl hover:shadow-gamified transition-all cursor-pointer hover:-translate-y-1 active:translate-y-0 active:shadow-sm" onClick={() => router.push(`/results/${exam.exam_id}`)}>
+                            <div className="flex items-center gap-5">
+                                <div className={`w-14 h-14 rounded-2xl flex items-center justify-center font-black text-2xl text-white shadow-sm border-2 border-black/10 ${
+                                    ['A', 'A*', 'B'].includes(exam.grade) ? 'bg-accent' : ['C', 'D'].includes(exam.grade) ? 'bg-amber-400' : 'bg-destructive'
                                 }`}>
                                     {exam.grade}
                                 </div>
                                 <div>
-                                    <h4 className="font-semibold text-zinc-900">{exam.exam_name}</h4>
-                                    <p className="text-xs text-zinc-500">{new Date(exam.date).toLocaleDateString()}</p>
+                                    <h4 className="font-extrabold text-foreground text-lg">{exam.exam_name}</h4>
+                                    <p className="text-sm font-medium text-muted-foreground">{new Date(exam.date).toLocaleDateString()}</p>
                                 </div>
                             </div>
-                            <div className="text-right">
-                                <span className="text-sm font-medium text-zinc-900">{exam.marks}/{exam.max_marks}</span>
+                            <div className="text-right bg-secondary/50 px-4 py-2 rounded-xl border-2 border-border/50">
+                                <span className="text-base font-black text-foreground">{exam.marks} <span className="text-muted-foreground text-sm font-bold">/ {exam.max_marks}</span></span>
                             </div>
                         </div>
                     ))}
@@ -152,7 +152,7 @@ export default function DashboardPage() {
         {/* Subjects Grid (Legacy/Static for navigation) */}
         <div>
             <div className="flex items-center justify-between mb-6">
-                <h3 className="text-calm-h3">Subjects</h3>
+                <h3 className="text-2xl font-black text-foreground flex items-center gap-2"><div className="w-3 h-8 bg-purple-500 rounded-full"></div> Subjects</h3>
             </div>
             
             <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -161,11 +161,11 @@ export default function DashboardPage() {
                ))}
 
                {/* Add Subject Card */}
-               <div className="p-6 rounded-3xl border-2 border-dashed border-zinc-200 hover:border-zinc-300 hover:bg-zinc-50 transition-all cursor-pointer flex flex-col items-center justify-center text-center gap-4 min-h-[200px] opacity-60 hover:opacity-100">
-                   <div className="w-12 h-12 rounded-full bg-zinc-100 flex items-center justify-center">
-                       <span className="text-2xl text-zinc-400">+</span>
+               <div className="p-6 rounded-3xl border-4 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-all cursor-pointer flex flex-col items-center justify-center text-center gap-4 min-h-[220px] group">
+                   <div className="w-16 h-16 rounded-2xl bg-secondary group-hover:bg-primary/20 flex items-center justify-center transition-colors">
+                       <span className="text-4xl text-muted-foreground group-hover:text-primary font-black">+</span>
                    </div>
-                   <p className="font-medium text-zinc-500">Add Subject</p>
+                   <p className="font-bold text-muted-foreground group-hover:text-primary transition-colors uppercase tracking-wide">Add Subject</p>
                </div>
             </div>
         </div>
