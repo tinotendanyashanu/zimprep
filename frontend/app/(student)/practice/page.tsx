@@ -18,6 +18,7 @@ import {
 } from "@/lib/api";
 import { UpgradePrompt } from "@/components/UpgradePrompt";
 import { useQuota } from "@/hooks/useQuota";
+import { MathText } from "@/components/math-text";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -335,7 +336,7 @@ export default function PracticePage() {
                       ))}
                     </div>
                   )}
-                  <p className="font-medium leading-relaxed">{question.text}</p>
+                  <MathText text={question.text} className="font-medium leading-relaxed" />
                 </div>
                 <span className="shrink-0 text-sm text-muted-foreground whitespace-nowrap">
                   {question.marks} mark{question.marks !== 1 ? "s" : ""}
@@ -422,7 +423,7 @@ export default function PracticePage() {
                           <ul className="space-y-1 pl-4">
                             {result.ai_feedback.correct_points.map((p, i) => (
                               <li key={i} className="list-disc text-muted-foreground">
-                                {p}
+                                <MathText text={p} />
                               </li>
                             ))}
                           </ul>
@@ -437,7 +438,7 @@ export default function PracticePage() {
                           <ul className="space-y-1 pl-4">
                             {result.ai_feedback.missing_points.map((p, i) => (
                               <li key={i} className="list-disc text-muted-foreground">
-                                {p}
+                                <MathText text={p} />
                               </li>
                             ))}
                           </ul>
@@ -447,7 +448,7 @@ export default function PracticePage() {
                       {result.ai_feedback.examiner_note && (
                         <div className="bg-muted rounded-lg px-4 py-3">
                           <p className="font-medium mb-0.5">Examiner note</p>
-                          <p className="text-muted-foreground">{result.ai_feedback.examiner_note}</p>
+                          <MathText text={result.ai_feedback.examiner_note} className="text-muted-foreground" />
                         </div>
                       )}
                     </div>

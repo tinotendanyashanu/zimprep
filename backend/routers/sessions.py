@@ -130,7 +130,7 @@ def get_session(session_id: str) -> dict[str, Any]:
     supabase = get_supabase()
     result = (
         supabase.table("session")
-        .select("*, paper!inner(id, year, paper_number, subject!inner(id, name, level))")
+        .select("*, paper!inner(id, year, paper_number, duration_minutes, subject!inner(id, name, level))")
         .eq("id", session_id)
         .single()
         .execute()

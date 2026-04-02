@@ -48,6 +48,7 @@ export type Session = {
     id: string;
     year: number;
     paper_number: number;
+    duration_minutes: number;
     subject: { id: string; name: string; level: string };
   };
 };

@@ -14,8 +14,8 @@ import {
 } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { MathText } from "@/components/math-text";
 
-const EXAM_DURATION = 2 * 60 * 60; // 7200 seconds
 const MCQ_OPTIONS = ["A", "B", "C", "D"] as const;
 
 function formatTime(seconds: number): string {
@@ -33,7 +33,7 @@ export default function ExamSessionPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [timeLeft, setTimeLeft] = useState(EXAM_DURATION);
+  const [timeLeft, setTimeLeft] = useState(120 * 60); // overwritten after session loads
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -57,6 +57,8 @@ export default function ExamSessionPage() {
           return;
         }
         setSession(s);
+        // Set timer from paper's duration (fallback to 2 hours if not set)
+        setTimeLeft((s.paper?.duration_minutes ?? 120) * 60);
         const qs = await getQuestionsForPaper(s.paper_id);
         setQuestions(qs);
 
@@ -278,7 +280,7 @@ export default function ExamSessionPage() {
                 </>
               )}
             </div>
-            <p className="text-foreground leading-relaxed">{currentQ.text}</p>
+            <MathText text={currentQ.text} className="text-foreground leading-relaxed" />
           </div>
 
           {/* Answer input */}
@@ -341,7 +343,7 @@ export default function ExamSessionPage() {
                           <p className="text-sm font-medium text-foreground">Correct points:</p>
                           <ul className="text-sm text-muted-foreground list-disc list-inside">
                             {practiceResult.ai_feedback.correct_points.map((p, i) => (
-                              <li key={i}>{p}</li>
+                              <li key={i}><MathText text={p} /></li>
                             ))}
                           </ul>
                         </div>
@@ -351,14 +353,14 @@ export default function ExamSessionPage() {
                           <p className="text-sm font-medium text-foreground">Missing points:</p>
                           <ul className="text-sm text-muted-foreground list-disc list-inside">
                             {practiceResult.ai_feedback.missing_points.map((p, i) => (
-                              <li key={i}>{p}</li>
+                              <li key={i}><MathText text={p} /></li>
                             ))}
                           </ul>
                         </div>
                       )}
                       <p className="text-sm text-foreground">
                         <span className="font-medium">Examiner note: </span>
-                        {practiceResult.ai_feedback.examiner_note}
+                        <MathText text={practiceResult.ai_feedback.examiner_note} />
                       </p>
                     </>
                   )}

@@ -19,6 +19,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { MathText } from "@/components/math-text";
 
 export default function ResultsPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -189,7 +190,7 @@ export default function ResultsPage() {
                             </p>
                             <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
                               {attempt.ai_feedback.correct_points.map((pt, j) => (
-                                <li key={j}>{pt}</li>
+                                <li key={j}><MathText text={pt} /></li>
                               ))}
                             </ul>
                           </div>
@@ -202,7 +203,7 @@ export default function ResultsPage() {
                             </p>
                             <ul className="text-sm text-foreground list-disc list-inside space-y-0.5">
                               {attempt.ai_feedback.missing_points.map((pt, j) => (
-                                <li key={j}>{pt}</li>
+                                <li key={j}><MathText text={pt} /></li>
                               ))}
                             </ul>
                           </div>
@@ -213,9 +214,7 @@ export default function ResultsPage() {
                             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1">
                               Examiner note
                             </p>
-                            <p className="text-sm text-foreground">
-                              {attempt.ai_feedback.examiner_note}
-                            </p>
+                            <MathText text={attempt.ai_feedback.examiner_note} className="text-sm text-foreground" />
                           </div>
                         )}
                       </>

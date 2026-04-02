@@ -10,9 +10,13 @@ type Paper = {
   subject_name: string;
   year: number;
   paper_number: number;
+  duration_minutes: number;
   status: string;
   created_at: string;
 };
+
+const LEVELS = ["Grade7", "O", "A"] as const;
+type Level = (typeof LEVELS)[number];
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -31,64 +35,83 @@ function StatusBadge({ status }: { status: string }) {
   );
 }
 
+function formatDuration(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}
+
 export default function AdminPapersPage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
+
+  // Subject selection: "existing" or "new"
+  const [subjectMode, setSubjectMode] = useState<"existing" | "new">("existing");
   const [subjectId, setSubjectId] = useState("");
-  const [year, setYear] = useState("");
-  const [paperNumber, setPaperNumber] = useState("");
+  const [newSubjectName, setNewSubjectName] = useState("");
+  const [newSubjectLevel, setNewSubjectLevel] = useState<Level>("O");
+
+  const [year, setYear] = useState(String(new Date().getFullYear()));
+  const [paperNumber, setPaperNumber] = useState("1");
+  const [durationMinutes, setDurationMinutes] = useState("120");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [uploadSuccess, setUploadSuccess] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  // Load subjects from Supabase via the frontend's server-side route would be
-  // cleanest, but for simplicity we fetch directly from the backend.
   useEffect(() => {
-    fetch(`${BACKEND}/admin/papers`)
-      .then((r) => r.json())
-      .then((data) => setPapers(Array.isArray(data) ? data : []))
-      .catch(() => {});
-
-    // Fetch subjects — we use the Supabase anon key via a simple fetch to the
-    // Supabase REST API so we don't need a dedicated backend endpoint for this.
-    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    if (supabaseUrl && anonKey) {
-      fetch(`${supabaseUrl}/rest/v1/subject?select=id,name,level&order=name`, {
-        headers: {
-          apikey: anonKey,
-          Authorization: `Bearer ${anonKey}`,
-        },
-      })
-        .then((r) => r.json())
-        .then((data) => {
-          if (Array.isArray(data)) setSubjects(data);
-        })
-        .catch(() => {});
-    }
+    loadPapers();
+    loadSubjects();
   }, []);
 
-  function refreshPapers() {
+  function loadPapers() {
     fetch(`${BACKEND}/admin/papers`)
       .then((r) => r.json())
       .then((data) => setPapers(Array.isArray(data) ? data : []))
       .catch(() => {});
   }
 
+  function loadSubjects() {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !anonKey) return;
+    fetch(`${supabaseUrl}/rest/v1/subject?select=id,name,level&order=name`, {
+      headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+    })
+      .then((r) => r.json())
+      .then((data) => { if (Array.isArray(data)) setSubjects(data); })
+      .catch(() => {});
+  }
+
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault();
-    if (!file || !subjectId || !year || !paperNumber) return;
+    if (!file || !year || !paperNumber || !durationMinutes) return;
+
+    if (subjectMode === "existing" && !subjectId) {
+      setUploadError("Please select a subject, or switch to 'New subject' to create one.");
+      return;
+    }
+    if (subjectMode === "new" && !newSubjectName.trim()) {
+      setUploadError("Please enter a subject name.");
+      return;
+    }
 
     setUploadError(null);
     setUploadSuccess(false);
     setUploading(true);
 
     const form = new FormData();
-    form.append("subject_id", subjectId);
+    if (subjectMode === "existing") {
+      form.append("subject_id", subjectId);
+    } else {
+      form.append("subject_name", newSubjectName.trim());
+      form.append("level", newSubjectLevel);
+    }
     form.append("year", year);
     form.append("paper_number", paperNumber);
+    form.append("duration_minutes", durationMinutes);
     form.append("file", file);
 
     try {
@@ -102,10 +125,14 @@ export default function AdminPapersPage() {
       }
       setUploadSuccess(true);
       setFile(null);
-      setYear("");
-      setPaperNumber("");
+      setYear(String(new Date().getFullYear()));
+      setPaperNumber("1");
+      setDurationMinutes("120");
+      setSubjectId("");
+      setNewSubjectName("");
       if (fileRef.current) fileRef.current.value = "";
-      refreshPapers();
+      loadPapers();
+      loadSubjects(); // refresh in case a new subject was created
     } catch (err: unknown) {
       setUploadError(err instanceof Error ? err.message : "Unknown error");
     } finally {
@@ -127,37 +154,75 @@ export default function AdminPapersPage() {
         {/* Upload form */}
         <div className="bg-card border border-border rounded-2xl p-6">
           <h2 className="text-base font-semibold text-foreground mb-5">Upload New Paper</h2>
-          <form onSubmit={handleUpload} className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm font-medium text-foreground mb-1.5">
-                  Subject
-                </label>
+          <form onSubmit={handleUpload} className="space-y-5">
+
+            {/* Subject */}
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="text-sm font-medium text-foreground">Subject</label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSubjectMode((m) => (m === "existing" ? "new" : "existing"));
+                    setUploadError(null);
+                  }}
+                  className="text-xs text-primary hover:underline"
+                >
+                  {subjectMode === "existing"
+                    ? subjects.length === 0
+                      ? "No subjects yet — create one"
+                      : "+ New subject"
+                    : "← Pick existing subject"}
+                </button>
+              </div>
+
+              {subjectMode === "existing" ? (
                 <select
-                  required
                   value={subjectId}
                   onChange={(e) => setSubjectId(e.target.value)}
                   className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  <option value="">Select subject…</option>
+                  <option value="">
+                    {subjects.length === 0 ? 'No subjects — click "+ New subject" above' : "Select subject…"}
+                  </option>
                   {subjects.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name} ({s.level})
                     </option>
                   ))}
                 </select>
-              </div>
+              ) : (
+                <div className="flex gap-3">
+                  <input
+                    type="text"
+                    placeholder="e.g. Mathematics, Combined Science"
+                    value={newSubjectName}
+                    onChange={(e) => setNewSubjectName(e.target.value)}
+                    className="flex-1 px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                  <select
+                    value={newSubjectLevel}
+                    onChange={(e) => setNewSubjectLevel(e.target.value as Level)}
+                    className="px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    {LEVELS.map((l) => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
 
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">Year</label>
                 <input
                   type="number"
                   required
                   min={1990}
-                  max={2030}
+                  max={2035}
                   value={year}
                   onChange={(e) => setYear(e.target.value)}
-                  placeholder="2023"
                   className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
@@ -173,24 +238,37 @@ export default function AdminPapersPage() {
                   max={4}
                   value={paperNumber}
                   onChange={(e) => setPaperNumber(e.target.value)}
-                  placeholder="1"
                   className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-foreground mb-1.5">
-                  PDF File
+                  Duration (minutes)
                 </label>
-                <input
-                  ref={fileRef}
-                  type="file"
-                  accept=".pdf,application/pdf"
-                  required
-                  onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-                  className="w-full px-3.5 py-2 rounded-lg border border-border bg-background text-foreground text-sm file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring"
-                />
+                <select
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(e.target.value)}
+                  className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="90">90 min (1.5 hrs)</option>
+                  <option value="120">120 min (2 hrs)</option>
+                  <option value="150">150 min (2.5 hrs)</option>
+                  <option value="180">180 min (3 hrs)</option>
+                </select>
               </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">PDF File</label>
+              <input
+                ref={fileRef}
+                type="file"
+                accept=".pdf,application/pdf"
+                required
+                onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+                className="w-full px-3.5 py-2 rounded-lg border border-border bg-background text-foreground text-sm file:mr-3 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-primary file:text-primary-foreground hover:file:opacity-90 focus:outline-none focus:ring-2 focus:ring-ring"
+              />
             </div>
 
             {uploadError && (
@@ -200,7 +278,7 @@ export default function AdminPapersPage() {
             )}
             {uploadSuccess && (
               <p className="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3.5 py-2.5">
-                Paper uploaded — extraction is running in the background.
+                Paper uploaded — extraction is running in the background. Refresh in ~30 seconds to see the status.
               </p>
             )}
 
@@ -209,7 +287,7 @@ export default function AdminPapersPage() {
               disabled={uploading}
               className="px-5 py-2.5 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              {uploading ? "Uploading…" : "Upload Paper"}
+              {uploading ? "Uploading…" : "Upload & Extract"}
             </button>
           </form>
         </div>
@@ -219,7 +297,7 @@ export default function AdminPapersPage() {
           <div className="flex items-center justify-between mb-5">
             <h2 className="text-base font-semibold text-foreground">Uploaded Papers</h2>
             <button
-              onClick={refreshPapers}
+              onClick={loadPapers}
               className="text-xs text-muted-foreground hover:text-foreground transition"
             >
               Refresh
@@ -235,7 +313,8 @@ export default function AdminPapersPage() {
                   <tr className="text-left text-muted-foreground border-b border-border">
                     <th className="pb-3 pr-4 font-medium">Subject</th>
                     <th className="pb-3 pr-4 font-medium">Year</th>
-                    <th className="pb-3 pr-4 font-medium">Paper #</th>
+                    <th className="pb-3 pr-4 font-medium">Paper</th>
+                    <th className="pb-3 pr-4 font-medium">Duration</th>
                     <th className="pb-3 pr-4 font-medium">Status</th>
                     <th className="pb-3 font-medium">Actions</th>
                   </tr>
@@ -248,6 +327,9 @@ export default function AdminPapersPage() {
                       </td>
                       <td className="py-3 pr-4 text-foreground">{p.year}</td>
                       <td className="py-3 pr-4 text-foreground">{p.paper_number}</td>
+                      <td className="py-3 pr-4 text-muted-foreground">
+                        {p.duration_minutes ? formatDuration(p.duration_minutes) : "—"}
+                      </td>
                       <td className="py-3 pr-4">
                         <StatusBadge status={p.status} />
                       </td>
@@ -259,8 +341,10 @@ export default function AdminPapersPage() {
                           >
                             Review Questions →
                           </a>
+                        ) : p.status === "processing" ? (
+                          <span className="text-muted-foreground text-xs">Extracting…</span>
                         ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
+                          <span className="text-red-600 text-xs">Extraction failed</span>
                         )}
                       </td>
                     </tr>

@@ -65,6 +65,7 @@ async def upload_paper(
     level: Optional[str] = Form(None),
     year: int = Form(...),
     paper_number: int = Form(...),
+    duration_minutes: int = Form(120),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
     """
@@ -143,6 +144,7 @@ async def upload_paper(
                 "subject_id": subject_id,
                 "year": year,
                 "paper_number": paper_number,
+                "duration_minutes": duration_minutes,
                 "pdf_url": pdf_url,
                 "status": "processing",
             }
