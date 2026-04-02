@@ -36,7 +36,7 @@ def _get_plan_code(tier: str) -> str:
         supabase.table("paystack_plan")
         .select("plan_code")
         .eq("tier", tier)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
@@ -54,7 +54,7 @@ def _get_student_email(student_id: str) -> str:
         supabase.table("student")
         .select("email")
         .eq("id", student_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
@@ -92,7 +92,7 @@ def get_subscription_status(student_id: str) -> dict[str, Any]:
         supabase.table("student")
         .select("subscription_tier")
         .eq("id", student_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not student_result.data:
