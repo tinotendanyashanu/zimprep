@@ -1,0 +1,9 @@
+[build]
+dockerfilePath = "backend/Dockerfile"
+buildCommand = ""
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 300
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 10
