@@ -23,7 +23,7 @@ def _get_student_tier(student_id: str) -> str:
         supabase.table("student")
         .select("subscription_tier")
         .eq("id", student_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:

@@ -57,11 +57,18 @@ def get_or_create_practice_session(body: PracticeSessionRequest) -> dict[str, An
             supabase.table("paper")
             .select("subject_id")
             .eq("id", session["paper_id"])
-            .single()
+            .maybe_single()
             .execute()
         )
         if paper.data and paper.data["subject_id"] == body.subject_id:
             return {"session_id": session["id"]}
+
+    # Ensure student row exists
+    supabase.table("student").upsert(
+        {"id": body.student_id, "subscription_tier": "starter"},
+        on_conflict="id",
+        ignore_duplicates=True,
+    ).execute()
 
     # No existing session — pick a ready paper for the subject
     paper_result = (
@@ -110,6 +117,14 @@ def create_session(body: CreateSessionRequest) -> dict[str, Any]:
             )
 
     supabase = get_supabase()
+
+    # Ensure student row exists (auth user may not have a profile row yet)
+    supabase.table("student").upsert(
+        {"id": body.student_id, "subscription_tier": "starter"},
+        on_conflict="id",
+        ignore_duplicates=True,
+    ).execute()
+
     session_id = str(uuid.uuid4())
     supabase.table("session").insert(
         {
@@ -132,7 +147,7 @@ def get_session(session_id: str) -> dict[str, Any]:
         supabase.table("session")
         .select("*, paper!inner(id, year, paper_number, duration_minutes, subject!inner(id, name, level))")
         .eq("id", session_id)
-        .single()
+        .maybe_single()
         .execute()
     )
     if not result.data:
