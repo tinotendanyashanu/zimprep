@@ -65,8 +65,8 @@ def list_questions_for_paper(paper_id: str) -> list[dict[str, Any]]:
     )
     if not questions_result.data:
         # Check if paper exists at all
-        paper = supabase.table("paper").select("id").eq("id", paper_id).single().execute()
-        if not paper.data:
+        paper = supabase.table("paper").select("id").eq("id", paper_id).maybe_single().execute()
+        if not paper or not paper.data:
             raise HTTPException(status_code=404, detail="Paper not found")
         return []
 

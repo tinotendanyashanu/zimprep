@@ -60,7 +60,7 @@ def get_or_create_practice_session(body: PracticeSessionRequest) -> dict[str, An
             .maybe_single()
             .execute()
         )
-        if paper.data and paper.data["subject_id"] == body.subject_id:
+        if paper and paper.data and paper.data["subject_id"] == body.subject_id:
             return {"session_id": session["id"]}
 
     # Ensure student row exists
@@ -150,7 +150,7 @@ def get_session(session_id: str) -> dict[str, Any]:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Session not found")
     return result.data
 
@@ -160,8 +160,8 @@ def autosave_session(session_id: str, body: SaveAnswersRequest) -> dict[str, Any
     """Save draft answers without changing session status or triggering marking."""
     supabase = get_supabase()
 
-    session = supabase.table("session").select("id").eq("id", session_id).single().execute()
-    if not session.data:
+    session = supabase.table("session").select("id").eq("id", session_id).maybe_single().execute()
+    if not session or not session.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
     for question_id, answer_text in body.answers.items():
@@ -190,10 +190,10 @@ def submit_session(
         supabase.table("session")
         .select("id, status")
         .eq("id", session_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not session_row.data:
+    if not session_row or not session_row.data:
         raise HTTPException(status_code=404, detail="Session not found")
     if session_row.data["status"] != "active":
         raise HTTPException(status_code=409, detail="Session already submitted")

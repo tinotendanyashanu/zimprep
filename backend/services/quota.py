@@ -26,7 +26,7 @@ def _get_student_tier(student_id: str) -> str:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         return "starter"
     return result.data.get("subscription_tier", "starter")
 
@@ -38,10 +38,10 @@ def _get_student_id_from_session(session_id: str) -> str | None:
         supabase.table("session")
         .select("student_id")
         .eq("id", session_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    return result.data["student_id"] if result.data else None
+    return result.data["student_id"] if (result and result.data) else None
 
 
 def _count_submissions_today(student_id: str) -> int:

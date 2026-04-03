@@ -63,10 +63,10 @@ def link_child(
         supabase.table("student")
         .select("id, name, email")
         .eq("email", body.child_email)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not student_result.data:
+    if not student_result or not student_result.data:
         raise HTTPException(status_code=404, detail="No student found with that email")
 
     student = student_result.data
@@ -93,10 +93,10 @@ def get_child_progress(
         supabase.table("student")
         .select("id, parent_id")
         .eq("id", student_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not student_result.data or student_result.data.get("parent_id") != parent_id:
+    if not student_result or not student_result.data or student_result.data.get("parent_id") != parent_id:
         raise HTTPException(status_code=403, detail="This student is not linked to your account")
 
     return svc.get_dashboard_data(student_id, subject_id)

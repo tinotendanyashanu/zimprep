@@ -70,10 +70,10 @@ def mark_attempt(attempt_id: str) -> None:
         supabase.table("attempt")
         .select("*, question!inner(*, subject!inner(*))")
         .eq("id", attempt_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not row.data:
+    if not row or not row.data:
         logger.error("Attempt %s not found", attempt_id)
         return
 
@@ -92,10 +92,10 @@ def mark_attempt(attempt_id: str) -> None:
             supabase.table("mcq_answer")
             .select("correct_option")
             .eq("question_id", question["id"])
-            .single()
+            .maybe_single()
             .execute()
         )
-        if mcq_row.data:
+        if mcq_row and mcq_row.data:
             correct = mcq_row.data["correct_option"]
             given = (student_answer or "").strip().upper()
             is_correct = given == correct

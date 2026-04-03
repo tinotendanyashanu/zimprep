@@ -44,10 +44,10 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
             supabase_check.table("question")
             .select("question_type")
             .eq("id", body.question_id)
-            .single()
+            .maybe_single()
             .execute()
         )
-        if q_result.data:
+        if q_result and q_result.data:
             question_type = q_result.data.get("question_type", "written")
 
     quota = check_practice_quota(body.session_id, question_type)
@@ -85,10 +85,10 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
         supabase.table("attempt")
         .select("*")
         .eq("id", attempt_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    return result.data
+    return result.data if (result and result.data) else {}
 
 
 @router.get("/{attempt_id}")
@@ -99,10 +99,10 @@ def get_attempt(attempt_id: str) -> dict[str, Any]:
         supabase.table("attempt")
         .select("*")
         .eq("id", attempt_id)
-        .single()
+        .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Attempt not found")
     return result.data
 
@@ -111,8 +111,8 @@ def get_attempt(attempt_id: str) -> dict[str, Any]:
 def flag_attempt(attempt_id: str) -> dict[str, Any]:
     """Flag an attempt for review of incorrect marking."""
     supabase = get_supabase()
-    result = supabase.table("attempt").select("id").eq("id", attempt_id).single().execute()
-    if not result.data:
+    result = supabase.table("attempt").select("id").eq("id", attempt_id).maybe_single().execute()
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
     supabase.table("attempt").update({"flagged": True}).eq("id", attempt_id).execute()

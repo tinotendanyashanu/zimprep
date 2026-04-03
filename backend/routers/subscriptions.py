@@ -39,7 +39,7 @@ def _get_plan_code(tier: str) -> str:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(
             status_code=500,
             detail=f"No Paystack plan configured for tier '{tier}'. "
@@ -57,7 +57,7 @@ def _get_student_email(student_id: str) -> str:
         .maybe_single()
         .execute()
     )
-    if not result.data:
+    if not result or not result.data:
         raise HTTPException(status_code=404, detail="Student not found")
     return result.data["email"]
 
@@ -95,7 +95,7 @@ def get_subscription_status(student_id: str) -> dict[str, Any]:
         .maybe_single()
         .execute()
     )
-    if not student_result.data:
+    if not student_result or not student_result.data:
         raise HTTPException(status_code=404, detail="Student not found")
     tier = student_result.data.get("subscription_tier", "starter")
 
