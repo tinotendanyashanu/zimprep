@@ -58,6 +58,7 @@ export type Attempt = {
   session_id: string;
   question_id: string;
   student_answer: string | null;
+  answer_image_url: string | null;
   ai_score: number | null;
   ai_feedback: {
     correct_points: string[];
@@ -214,6 +215,7 @@ export const submitAttempt = (
   sessionId: string,
   questionId: string,
   answer: string,
+  answerImageUrl?: string,
 ) =>
   apiFetch<Attempt>("/attempts/", {
     method: "POST",
@@ -221,7 +223,8 @@ export const submitAttempt = (
     body: JSON.stringify({
       session_id: sessionId,
       question_id: questionId,
-      student_answer: answer,
+      student_answer: answer || null,
+      answer_image_url: answerImageUrl || null,
     }),
   });
 
