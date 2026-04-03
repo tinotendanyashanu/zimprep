@@ -126,20 +126,6 @@ def create_session(body: CreateSessionRequest) -> dict[str, Any]:
     if body.mode not in ("exam", "practice"):
         raise HTTPException(status_code=422, detail="mode must be 'exam' or 'practice'")
 
-    # Exam mode is gated behind paid tiers
-    if body.mode == "exam":
-        quota = check_exam_quota(body.student_id)
-        if not quota.allowed:
-            raise HTTPException(
-                status_code=402,
-                detail={
-                    "code": "tier_required",
-                    "tier": quota.tier,
-                    "feature": "exam",
-                    "message": "Exam Mode requires a paid subscription. Upgrade to access full past papers.",
-                },
-            )
-
     _ensure_student(body.student_id)
 
     supabase = get_supabase()
