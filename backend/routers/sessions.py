@@ -19,6 +19,35 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ── Helpers ────────────────────────────────────────────────────────────────────
+
+def _ensure_student(student_id: str) -> None:
+    """
+    Guarantee a row exists in the student table for this auth user.
+    Fetches email from Supabase Auth (service role) so the NOT NULL
+    constraint on student.email is satisfied.
+    """
+    supabase = get_supabase()
+    existing = supabase.table("student").select("id").eq("id", student_id).maybe_single().execute()
+    if existing and existing.data:
+        return  # already exists, nothing to do
+
+    try:
+        auth_user = supabase.auth.admin.get_user_by_id(student_id)
+        email = auth_user.user.email if auth_user and auth_user.user else None
+    except Exception:
+        email = None
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Could not resolve auth user email")
+
+    supabase.table("student").upsert(
+        {"id": student_id, "email": email, "subscription_tier": "starter"},
+        on_conflict="id",
+        ignore_duplicates=True,
+    ).execute()
+
+
 # ── Request schemas ────────────────────────────────────────────────────────────
 
 class CreateSessionRequest(BaseModel):
@@ -63,12 +92,7 @@ def get_or_create_practice_session(body: PracticeSessionRequest) -> dict[str, An
         if paper and paper.data and paper.data["subject_id"] == body.subject_id:
             return {"session_id": session["id"]}
 
-    # Ensure student row exists
-    supabase.table("student").upsert(
-        {"id": body.student_id, "subscription_tier": "starter"},
-        on_conflict="id",
-        ignore_duplicates=True,
-    ).execute()
+    _ensure_student(body.student_id)
 
     # No existing session — pick a ready paper for the subject
     paper_result = (
@@ -116,15 +140,9 @@ def create_session(body: CreateSessionRequest) -> dict[str, Any]:
                 },
             )
 
+    _ensure_student(body.student_id)
+
     supabase = get_supabase()
-
-    # Ensure student row exists (auth user may not have a profile row yet)
-    supabase.table("student").upsert(
-        {"id": body.student_id, "subscription_tier": "starter"},
-        on_conflict="id",
-        ignore_duplicates=True,
-    ).execute()
-
     session_id = str(uuid.uuid4())
     supabase.table("session").insert(
         {
