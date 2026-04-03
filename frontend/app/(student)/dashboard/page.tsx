@@ -10,7 +10,8 @@ import {
   type SessionSummary,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
-import { QuotaBar, PastDueBanner } from "@/components";
+import { QuotaBar } from "@/components/QuotaBar";
+import { PastDueBanner } from "@/components/PastDueBanner";
 import { useQuota } from "@/hooks/useQuota";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
