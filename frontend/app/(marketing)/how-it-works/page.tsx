@@ -81,8 +81,8 @@ export default function HowItWorksPage() {
               <p className="text-muted-foreground mb-8">
                 No tricks. Just structured, effective preparation.
               </p>
-              <Button size="lg" className="btn-primary h-14 px-12 text-lg rounded-full">
-                Start Practicing
+              <Button size="lg" asChild className="btn-primary h-14 px-12 text-lg rounded-full">
+                <Link href="/register">Start Practicing</Link>
               </Button>
            </div>
         </section>

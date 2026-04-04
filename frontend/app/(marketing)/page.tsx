@@ -30,12 +30,12 @@ export default function Home() {
           <p className="text-calm-body max-w-3xl mx-auto mb-10">
              Practice real exam papers for Grade 7, Form 4, and Form 6 with examiner-style marking.
           </p>
-          <div className="flex items-center justify-center gap-4 mb-20">
-            <Button size="lg" className="btn-primary h-14 px-10 text-lg rounded-full">
-              Start Free Trial
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-20">
+            <Button size="lg" asChild className="btn-primary h-14 px-10 text-lg rounded-full w-full sm:w-auto">
+              <Link href="/register">Start Free Trial</Link>
             </Button>
-            <Button size="lg" variant="ghost" className="btn-secondary h-14 px-10 text-lg rounded-full text-foreground hover:bg-zinc-100">
-              View Demo
+            <Button size="lg" variant="ghost" asChild className="btn-secondary h-14 px-10 text-lg rounded-full text-foreground hover:bg-zinc-100 w-full sm:w-auto">
+              <Link href="/how-it-works">View Demo</Link>
             </Button>
           </div>
           
@@ -170,8 +170,10 @@ export default function Home() {
              <p className="text-calm-body text-base mb-8">
               ZimPrep shows your strengths, exposes gaps, and highlights patterns that need attention, so revision time is focused where it matters most. No guessing. No false confidence.
             </p>
-            <Button variant="link" className="p-0 text-primary font-bold text-lg h-auto hover:no-underline hover:opacity-80">
-              Explore Analytics <ArrowRight className="w-4 h-4 ml-2" />
+            <Button variant="link" asChild className="p-0 text-primary font-bold text-lg h-auto hover:no-underline hover:opacity-80">
+              <Link href="/register" className="flex items-center">
+                Explore Analytics <ArrowRight className="w-4 h-4 ml-2" />
+              </Link>
             </Button>
           </div>
           <div className="bg-white rounded-[2.5rem] p-8 md:p-12 shadow-2xl shadow-zinc-200/50 aspect-square flex flex-col justify-center relative border border-zinc-100 overflow-hidden">
@@ -273,8 +275,8 @@ export default function Home() {
                     </li>
                  ))}
               </ul>
-              <Button className={`w-full rounded-full h-12 font-bold ${plan.popular ? 'bg-primary hover:bg-primary/90' : 'bg-zinc-200 text-zinc-900 hover:bg-zinc-300'}`}>
-                 Choose {plan.name}
+              <Button asChild className={`w-full rounded-full h-12 font-bold ${plan.popular ? 'bg-primary hover:bg-primary/90' : 'bg-zinc-200 text-zinc-900 hover:bg-zinc-300'}`}>
+                <Link href="/register">Choose {plan.name}</Link>
               </Button>
             </Card>
           ))}
@@ -315,8 +317,8 @@ export default function Home() {
       <section className="py-32 px-6 text-center">
          <div className="max-w-2xl mx-auto">
             <h2 className="text-calm-h2 mb-8">Prepare the way exams are actually marked.</h2>
-            <Button size="lg" className="btn-primary h-14 px-12 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
-              Start Free Trial
+            <Button size="lg" asChild className="btn-primary h-14 px-12 text-lg rounded-full shadow-lg hover:shadow-xl transition-all">
+              <Link href="/register">Start Free Trial</Link>
             </Button>
          </div>
       </section>
