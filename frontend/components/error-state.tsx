@@ -1,10 +1,10 @@
 /**
  * Error state component for displaying errors with trace_id
- * 
- * Preserves existing visual design
+ * standardizing with ZimPrep Design System
  */
 
 import { AlertCircle } from 'lucide-react';
+import { Button } from './ui/button';
 
 interface ErrorStateProps {
   error: string;
@@ -14,32 +14,29 @@ interface ErrorStateProps {
 
 export function ErrorState({ error, traceId, onRetry }: ErrorStateProps) {
   return (
-    <div className="flex flex-col items-center justify-center p-8 text-center">
-      <div className="rounded-full bg-red-50 p-3 mb-4">
-        <AlertCircle className="h-6 w-6 text-red-600" />
+    <div className="flex flex-col items-center justify-center p-8 text-center panel shadow-none border-none">
+      <div className="rounded-full bg-destructive/10 p-4 mb-6">
+        <AlertCircle className="h-8 w-8 text-destructive" />
       </div>
       
-      <h3 className="text-lg font-semibold text-slate-900 mb-2">
+      <h3 className="text-xl font-semibold text-foreground mb-2 tracking-tight">
         Something went wrong
       </h3>
       
-      <p className="text-slate-600 mb-4 max-w-md">
+      <p className="text-muted-foreground mb-6 max-w-md leading-relaxed text-base">
         {error}
       </p>
       
       {traceId && (
-        <p className="text-xs text-slate-400 mb-4 font-mono">
+        <p className="text-xs text-muted-foreground/60 mb-6 font-mono bg-muted p-2 rounded-md">
           Trace ID: {traceId}
         </p>
       )}
       
       {onRetry && (
-        <button
-          onClick={onRetry}
-          className="px-4 py-2 bg-slate-900 text-white rounded-lg hover:bg-slate-800 transition-colors"
-        >
+        <Button onClick={onRetry} size="lg" className="w-full sm:w-auto">
           Try Again
-        </button>
+        </Button>
       )}
     </div>
   );

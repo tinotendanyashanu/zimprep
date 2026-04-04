@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, CheckCircle2, FileText, BarChart3, GraduationCap } from "lucide-react";
+import { FileText, BarChart3, GraduationCap } from "lucide-react";
 
 export default function HowItWorksPage() {
   return (
@@ -44,7 +44,7 @@ export default function HowItWorksPage() {
                   <span className="text-primary font-bold tracking-wider text-sm uppercase mb-2 block">Step 02</span>
                   <h2 className="text-3xl md:text-4xl font-semibold mb-4">Practice with examiner logic.</h2>
                   <p className="text-muted-foreground text-lg leading-relaxed">
-                    Answer questions under timed conditions. Our system doesn't just check if you are "right" or "wrong"—it checks if your answer contains the specific keywords and logical steps examiners award marks for.
+                    Answer questions under timed conditions. Our system doesn&apos;t just check if you are &quot;right&quot; or &quot;wrong&quot;—it checks if your answer contains the specific keywords and logical steps examiners award marks for.
                   </p>
                </div>
                <div className="order-2 bg-zinc-50 rounded-[2.5rem] p-8 md:p-12 aspect-[4/3] flex items-center justify-center border border-zinc-100">

@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, CheckCircle2, ChevronDown, Trophy, Shield, Zap } from "lucide-react";
+import { ArrowRight, CheckCircle2 } from "lucide-react";
 import {
   Accordion,
   AccordionContent,

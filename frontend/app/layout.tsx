@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { DM_Sans } from "next/font/google";
+import { DM_Sans, Inter } from "next/font/google";
 import "./globals.css";
 
 const dmSans = DM_Sans({
@@ -8,9 +8,20 @@ const dmSans = DM_Sans({
   display: "swap",
 });
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
   title: "ZimPrep | Master the Art of Exams",
   description: "Experience the most cinematic and effective ZIMSEC preparation platform. Master examiner techniques with data-driven insights.",
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    viewportFit: "cover",
+  },
 };
 
 export default function RootLayout({
@@ -21,7 +32,7 @@ export default function RootLayout({
   return (
     <html lang="en" className="light scroll-smooth" suppressHydrationWarning>
       <body
-        className={`${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground`}
+        className={`${inter.variable} ${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground`}
         suppressHydrationWarning
       >
         <main className="relative">{children}</main>
@@ -29,4 +40,3 @@ export default function RootLayout({
     </html>
   );
 }
-

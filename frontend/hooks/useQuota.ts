@@ -83,8 +83,20 @@ export function useQuota(): UseQuotaReturn {
   }, [studentId, token]);
 
   useEffect(() => {
-    if (studentId) fetchStatus();
-  }, [studentId, fetchStatus]);
+    if (!studentId) return;
+    getSubscriptionStatus(studentId, token ?? undefined)
+      .then((data) => {
+        setTier(data.tier);
+        setQuota(data.quota);
+        setSubscription(data.subscription);
+      })
+      .catch(() => {
+        setTier("starter");
+        setQuota({ tier: "starter", allowed: true, used: 0, limit: 5, feature: "practice" });
+        setSubscription(null);
+      })
+      .finally(() => setLoading(false));
+  }, [studentId, token]);
 
   const guardedSubmit = useCallback(
     async <T>(fn: () => Promise<T>): Promise<T | null> => {

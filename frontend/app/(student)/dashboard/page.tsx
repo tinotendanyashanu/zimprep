@@ -13,120 +13,84 @@ import { cn } from "@/lib/utils";
 import { QuotaBar } from "@/components/QuotaBar";
 import { PastDueBanner } from "@/components/PastDueBanner";
 import { useQuota } from "@/hooks/useQuota";
+import { motion, AnimatePresence } from "framer-motion";
+import { Target, AlertTriangle, BookOpen, Clock, ChevronRight, CheckCircle2, XCircle, MoreVertical, Flame } from "lucide-react";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function riColor(ri: number) {
-  if (ri >= 70) return "text-green-600";
-  if (ri >= 40) return "text-amber-500";
-  return "text-red-500";
-}
-
-function riBarColor(ri: number) {
-  if (ri >= 70) return "bg-green-500";
-  if (ri >= 40) return "bg-amber-400";
-  return "bg-red-500";
-}
+// ── Helpers ──────────────
 
 function fmt(n: number | null | undefined) {
-  return n != null ? `${n}%` : "—";
+  return n != null ? `${n}%` : "0%";
 }
 
-// ── Sub-components ────────────────────────────────────────────────────────────
+function getRITagline(ri: number, subjectName: string) {
+  if (ri >= 75) return `You're exceptionally prepared for ${subjectName}.`;
+  if (ri >= 50) return `You're making solid progress in ${subjectName}.`;
+  return `Serious practice is required for ${subjectName}.`;
+}
 
-function StatCard({
-  label,
-  value,
-  sub,
-  valueClass,
-}: {
-  label: string;
-  value: string;
-  sub?: string;
-  valueClass?: string;
-}) {
+function riColorHex(ri: number) {
+  if (ri >= 75) return "#16a34a"; // green-600
+  if (ri >= 50) return "#d97706"; // amber-600
+  return "#dc2626";               // red-600
+}
+
+function riColorClass(ri: number) {
+  if (ri >= 75) return "text-green-600 bg-green-50"; 
+  if (ri >= 50) return "text-amber-600 bg-amber-50"; 
+  return "text-red-600 bg-red-50";               
+}
+
+// ── Google Material Components ──
+
+const materialCard = "bg-white border border-gray-200 rounded-xl md:rounded-2xl shadow-sm";
+const cardPadding = "p-5 md:p-6";
+const sectionHeader = "text-sm font-bold text-gray-800 tracking-tight uppercase px-1 mb-3";
+
+function CircularProgress({ value, size = 180, strokeWidth = 14 }: { value: number; size?: number; strokeWidth?: number }) {
+  const radius = (size - strokeWidth) / 2;
+  const circumference = radius * 2 * Math.PI;
+  const offset = circumference - (value / 100) * circumference;
+  
   return (
-    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-sm text-gray-500">{label}</p>
-      <p className={cn("mt-1 text-3xl font-bold", valueClass)}>{value}</p>
-      {sub && <p className="mt-1 text-xs text-gray-400">{sub}</p>}
+    <div className="relative flex items-center justify-center" style={{ width: size, height: size }}>
+      {/* Background Track */}
+      <svg className="absolute inset-0" width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke="#f3f4f6"
+          strokeWidth={strokeWidth}
+        />
+      </svg>
+      {/* Foreground Track */}
+      <svg className="absolute inset-0 transform -rotate-90" width={size} height={size}>
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={riColorHex(value)}
+          strokeWidth={strokeWidth}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          strokeLinecap="round"
+          className="transition-all duration-1000 ease-out"
+        />
+      </svg>
+      {/* Center Label */}
+      <div className="flex flex-col items-center">
+        <span className="text-5xl font-extrabold tracking-tighter text-gray-900 leading-none">
+          {value}
+        </span>
+        <span className="text-xs font-semibold uppercase tracking-widest text-gray-500 mt-1">Index</span>
+      </div>
     </div>
   );
 }
 
-function ProgressBar({ value, color }: { value: number; color: string }) {
-  return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-      <div
-        className={cn("h-full rounded-full transition-all", color)}
-        style={{ width: `${Math.min(value, 100)}%` }}
-      />
-    </div>
-  );
-}
-
-function ReadinessBreakdown({
-  accuracy,
-  coverage,
-  consistency,
-}: {
-  accuracy: number;
-  coverage: number;
-  consistency: number;
-}) {
-  const bars = [
-    { label: "Accuracy (40%)", value: accuracy, color: "bg-blue-500" },
-    { label: "Coverage (35%)", value: coverage, color: "bg-purple-500" },
-    { label: "Consistency (25%)", value: consistency, color: "bg-orange-400" },
-  ];
-  return (
-    <div className="space-y-3">
-      {bars.map((b) => (
-        <div key={b.label}>
-          <div className="mb-1 flex justify-between text-sm">
-            <span className="text-gray-600">{b.label}</span>
-            <span className="font-medium">{fmt(b.value)}</span>
-          </div>
-          <ProgressBar value={b.value} color={b.color} />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function SessionRow({ s }: { s: SessionSummary }) {
-  const date = s.completed_at
-    ? new Date(s.completed_at).toLocaleDateString("en-GB", {
-        day: "numeric",
-        month: "short",
-      })
-    : "—";
-  const label = s.subject_name
-    ? `${s.subject_name} ${s.paper_year} P${s.paper_number}`
-    : "—";
-  return (
-    <tr className="border-t border-gray-100 text-sm">
-      <td className="py-2 pr-4 text-gray-500">{date}</td>
-      <td className="py-2 pr-4">{label}</td>
-      <td className="py-2 pr-4 capitalize text-gray-500">{s.mode}</td>
-      <td className="py-2 pr-4 font-medium">
-        {s.total_marks > 0
-          ? `${s.score}/${s.total_marks} (${s.percentage}%)`
-          : "Marking…"}
-      </td>
-      <td className="py-2">
-        <Link
-          href={`/exam/${s.session_id}/results`}
-          className="text-blue-600 hover:underline"
-        >
-          View
-        </Link>
-      </td>
-    </tr>
-  );
-}
-
-// ── Page ──────────────────────────────────────────────────────────────────────
+// ── Main Dashboard ──────────────
 
 export default function DashboardPage() {
   const [studentId, setStudentId] = useState<string | null>(null);
@@ -158,7 +122,6 @@ export default function DashboardPage() {
 
   useEffect(() => {
     if (!studentId || !token) return;
-    setLoading(true);
     getStudentDashboard(studentId, selectedSubject, token)
       .then((d) => {
         setData(d);
@@ -170,274 +133,342 @@ export default function DashboardPage() {
 
   if (loading) {
     return (
-      <div className="flex min-h-[60vh] items-center justify-center text-gray-400">
-        Loading dashboard…
+      <div className="min-h-screen bg-[#F8F9FA] p-4 flex items-center justify-center">
+        <div className="animate-pulse flex flex-col items-center">
+          <div className="h-32 w-32 bg-gray-200 rounded-full mb-4" />
+          <div className="h-4 w-48 bg-gray-200 rounded" />
+        </div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="mx-auto max-w-2xl p-8 text-center text-red-500">
-        {error}
+      <div className="min-h-screen bg-[#F8F9FA] flex items-center justify-center p-8">
+        <div className="bg-red-50 text-red-800 border border-red-200 p-6 rounded-xl flex items-center gap-3 w-full max-w-md">
+          <AlertTriangle className="h-6 w-6 shrink-0" />
+          <p className="font-medium text-sm">{error}</p>
+        </div>
       </div>
     );
   }
 
-  // Empty state
+  const containerVars = {
+    hidden: { opacity: 0 },
+    show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+  };
+  const itemVars = {
+    hidden: { opacity: 0, y: 10 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.3 } }
+  };
+
+  // Empty Data Flow (New Student)
   if (!data?.has_data) {
     return (
-      <div className="mx-auto max-w-2xl px-4 py-16 text-center">
-        <h1 className="mb-2 text-2xl font-bold">
-          Welcome{name ? `, ${name}` : ""}!
-        </h1>
-        <p className="mb-8 text-gray-500">
-          You haven&apos;t attempted any papers yet. Get started below.
-        </p>
+      <motion.div variants={containerVars} initial="hidden" animate="show" className="min-h-screen bg-[#F8F9FA] mx-auto max-w-xl px-4 py-16">
+        <div className="text-center mb-10">
+          <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Welcome, {name}</h1>
+          <p className="text-gray-500 mt-2">You haven't completed any sessions yet to generate a Readiness Index.</p>
+        </div>
         <div className="grid gap-4 sm:grid-cols-2">
-          <Link
-            href="/exam/select"
-            className="rounded-xl border border-gray-200 bg-white p-6 text-left shadow-sm transition-shadow hover:shadow-md"
-          >
-            <p className="mb-1 font-semibold">Exam Mode</p>
-            <p className="text-sm text-gray-500">
-              Timed past paper under exam conditions.
-            </p>
+          <Link href="/practice" className="block">
+             <div className="p-6 bg-white border border-gray-200 rounded-2xl hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.98]">
+              <Target className="h-8 w-8 text-blue-600 mb-4" />
+              <p className="font-bold text-gray-900 text-lg">Start Practice</p>
+              <p className="text-sm text-gray-500 mt-1">Adaptive learning mode</p>
+            </div>
           </Link>
-          <Link
-            href="/practice"
-            className="rounded-xl border border-gray-200 bg-white p-6 text-left shadow-sm transition-shadow hover:shadow-md"
-          >
-            <p className="mb-1 font-semibold">Practice Mode</p>
-            <p className="text-sm text-gray-500">
-              Adaptive questions with instant AI feedback.
-            </p>
+          <Link href="/exam/select" className="block">
+             <div className="p-6 bg-white border border-gray-200 rounded-2xl hover:border-blue-300 hover:shadow-md transition-all active:scale-[0.98]">
+              <Clock className="h-8 w-8 text-indigo-600 mb-4" />
+              <p className="font-bold text-gray-900 text-lg">Take Exam</p>
+              <p className="text-sm text-gray-500 mt-1">Timed past papers</p>
+            </div>
           </Link>
         </div>
-      </div>
+      </motion.div>
     );
   }
 
   const ri = data.readiness!;
   const streak = data.streak;
-  const coverage = data.coverage;
-  const weakTopics: WeakTopic[] = data.weak_topics;
+  const weakTopics = data.weak_topics;
+  const currentSubjectName = data.subjects.find(s => s.id === selectedSubject)?.name || "All Subjects";
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      {/* Paywall banners */}
-      {subscription && subscription.status === "past_due" && (
-        <div className="mb-4">
-          <PastDueBanner subscription={subscription} />
-        </div>
-      )}
-      {quota && quota.limit !== null && (
-        <div className="mb-4">
-          <QuotaBar quota={quota} />
-        </div>
-      )}
+    <div className="min-h-screen bg-[#F8F9FA] text-gray-900 pb-24 font-sans selection:bg-blue-100">
+      <motion.div 
+        variants={containerVars} 
+        initial="hidden" 
+        animate="show" 
+        className="mx-auto max-w-2xl px-4 pt-6"
+      >
+        {/* Top Header Row / Navigation */}
+        <motion.div variants={itemVars} className="flex items-center justify-between mb-8">
+          {data.subjects.length > 1 ? (
+            <div className="bg-white border border-gray-200 rounded-full px-4 py-2 shadow-sm relative flex items-center">
+              <select
+                value={selectedSubject}
+                onChange={(e) => setSelectedSubject(e.target.value)}
+                className="appearance-none bg-transparent text-sm font-bold text-gray-800 pr-6 outline-none cursor-pointer"
+              >
+                {data.subjects.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} Context</option>
+                ))}
+              </select>
+              <span className="absolute right-3 pointer-events-none text-gray-400">▾</span>
+            </div>
+          ) : (
+            <span className="px-4 py-2 text-sm font-bold text-gray-800 border border-gray-200 bg-white rounded-full shadow-sm">
+              {currentSubjectName}
+            </span>
+          )}
+          
+          <div className="font-medium text-sm text-gray-500">
+            {name} Dashboard
+          </div>
+        </motion.div>
 
-      {/* Header */}
-      <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {name ? `${name}'s Dashboard` : "Dashboard"}
-          </h1>
-          <p className="text-sm text-gray-500">Track your exam readiness</p>
-        </div>
+        <AnimatePresence>
+          {(subscription?.status === "past_due" || quota?.limit !== null) && (
+            <motion.div layout variants={itemVars} className="mb-6 space-y-3">
+              {subscription && subscription.status === "past_due" && <PastDueBanner subscription={subscription} />}
+              {quota && quota.limit !== null && <QuotaBar quota={quota} />}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {data.subjects.length > 1 && (
-          <select
-            value={selectedSubject}
-            onChange={(e) => setSelectedSubject(e.target.value)}
-            className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            {data.subjects.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+        {/* 1. Readiness Index (Primary Hero) */}
+        <motion.div variants={itemVars} className="mb-10">
+          <div className={cn(materialCard, cardPadding, "flex flex-col items-center justify-center text-center")}>
+            <h2 className="text-xs font-bold uppercase tracking-widest text-gray-400 mb-6">Readiness Index</h2>
+            
+            <CircularProgress value={ri.readiness_index} size={190} strokeWidth={16} />
+            
+            <div className="mt-8 mb-4 max-w-xs mx-auto">
+              {/* Score Breakdown Bars */}
+              <div className="space-y-3">
+                <div>
+                  <div className="flex justify-between text-xs font-semibold text-gray-600 mb-1">
+                    <span>Accuracy (40%)</span>
+                    <span>{fmt(ri.accuracy)}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-blue-500 rounded-full" style={{width: `${ri.accuracy}%`}} />
+                  </div>
+                </div>
+                <div>
+                  <div className="flex justify-between text-xs font-semibold text-gray-600 mb-1">
+                    <span>Coverage (35%)</span>
+                    <span>{fmt(ri.coverage)}</span>
+                  </div>
+                  <div className="h-1.5 w-full bg-gray-100 rounded-full overflow-hidden">
+                    <div className="h-full bg-indigo-500 rounded-full" style={{width: `${ri.coverage}%`}} />
+                  </div>
+                </div>
+              </div>
+            </div>
 
-      {/* Readiness Index hero */}
-      <div className="mb-6 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
-        <div className="mb-3 flex items-end gap-4">
-          <div>
-            <p className="text-sm text-gray-500">Readiness Index</p>
-            <p className={cn("text-5xl font-black", riColor(ri.readiness_index))}>
-              {ri.readiness_index}%
+            <p className={cn("text-sm font-semibold mt-2 px-4 py-2 rounded-lg", riColorClass(ri.readiness_index))}>
+              {getRITagline(ri.readiness_index, currentSubjectName)}
             </p>
           </div>
-          <div className="mb-1 flex-1">
-            <ProgressBar
-              value={ri.readiness_index}
-              color={riBarColor(ri.readiness_index)}
-            />
-          </div>
-        </div>
-        <p className="mb-4 text-xs text-gray-400">
-          RI = Accuracy × 40% + Coverage × 35% + Consistency × 25%
-        </p>
-        <ReadinessBreakdown
-          accuracy={ri.accuracy}
-          coverage={ri.coverage}
-          consistency={ri.consistency}
-        />
-      </div>
+        </motion.div>
 
-      {/* Stat cards */}
-      <div className="mb-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard
-          label="Accuracy"
-          value={fmt(ri.accuracy)}
-          valueClass="text-blue-600"
-        />
-        <StatCard
-          label="Streak"
-          value={`${streak.current}d`}
-          sub={`Longest: ${streak.longest}d`}
-          valueClass="text-orange-500"
-        />
-        <StatCard
-          label="Coverage"
-          value={fmt(ri.coverage)}
-          sub={
-            coverage
-              ? `${coverage.covered_count}/${coverage.total_count} topics`
-              : undefined
-          }
-          valueClass="text-purple-600"
-        />
-        <StatCard
-          label="Consistency"
-          value={fmt(ri.consistency)}
-          valueClass="text-amber-500"
-        />
-      </div>
+        {/* Next Actions (Clear CTAs placed immediately below context) */}
+        <motion.div variants={itemVars} className="grid grid-cols-2 gap-3 mb-10">
+          <Link href="/practice" className="block">
+            <div className="bg-blue-600 hover:bg-blue-700 text-white rounded-xl p-4 flex flex-col items-center justify-center shadow-sm transition-colors active:scale-[0.98]">
+              <Target className="h-6 w-6 mb-2 text-blue-100" />
+              <span className="font-bold text-[15px]">Start Practice</span>
+            </div>
+          </Link>
+          <Link href="/exam/select" className="block">
+            <div className="bg-white border border-gray-200 hover:bg-gray-50 text-gray-900 rounded-xl p-4 flex flex-col items-center justify-center shadow-sm transition-colors active:scale-[0.98]">
+              <Clock className="h-6 w-6 mb-2 text-gray-500" />
+              <span className="font-bold text-[15px]">Take Exam</span>
+            </div>
+          </Link>
+        </motion.div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Recent sessions */}
-        <div className="lg:col-span-2">
-          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 font-semibold">Recent Sessions</h2>
-            {data.recent_sessions.length === 0 ? (
-              <p className="text-sm text-gray-400">No completed sessions yet.</p>
+        {/* 2. Weak Topics (Immediate Actionable Focus) */}
+        <motion.div variants={itemVars} className="mb-10">
+          <h2 className={sectionHeader}>Target Study Areas</h2>
+          <div className={cn(materialCard, "overflow-hidden")}>
+            {weakTopics.length > 0 ? (
+              <div className="divide-y divide-gray-100">
+                {weakTopics.slice(0, 4).map((t) => (
+                  <div key={t.topic} className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-bold text-gray-900 truncate mb-1">{t.topic}</p>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 max-w-[120px] h-1.5 bg-red-100 rounded-full overflow-hidden">
+                          <div className="h-full bg-red-500 rounded-full" style={{ width: `${t.fail_ratio * 100}%` }}/>
+                        </div>
+                        <span className="text-[11px] font-bold text-red-600 uppercase tracking-wide">
+                          {Math.round(t.fail_ratio * 100)}% Miss Rate
+                        </span>
+                      </div>
+                    </div>
+                    <Link href={`/practice?topic=${encodeURIComponent(t.topic)}`}>
+                       <button className="shrink-0 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-1.5 rounded-lg text-sm font-bold transition-colors w-full sm:w-auto mt-2 sm:mt-0">
+                         Practice Topic
+                       </button>
+                    </Link>
+                  </div>
+                ))}
+              </div>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead>
-                    <tr className="text-left text-xs text-gray-400">
-                      <th className="pb-2 pr-4">Date</th>
-                      <th className="pb-2 pr-4">Paper</th>
-                      <th className="pb-2 pr-4">Mode</th>
-                      <th className="pb-2 pr-4">Score</th>
-                      <th className="pb-2" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {data.recent_sessions.map((s) => (
-                      <SessionRow key={s.session_id} s={s} />
-                    ))}
-                  </tbody>
-                </table>
+              <div className="p-6 text-center">
+                <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                <p className="text-sm font-medium text-gray-500">No weak topics identified yet. Keep going!</p>
               </div>
             )}
-            <div className="mt-4 flex gap-3">
-              <Link
-                href="/exam/select"
-                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-700"
-              >
-                New Exam
-              </Link>
-              <Link
-                href="/practice"
-                className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium hover:bg-gray-50"
-              >
-                Practice
-              </Link>
+          </div>
+        </motion.div>
+
+        {/* 3. Active Subjects Panel */}
+        <motion.div variants={itemVars} className="mb-10">
+          <h2 className={sectionHeader}>Subscribed Subjects</h2>
+          <div className="grid sm:grid-cols-2 gap-3">
+            {data.subjects.map(s => (
+              <div key={s.id} className={cn(materialCard, "p-4 flex flex-col justify-between hover:border-gray-300 transition-colors cursor-pointer")} onClick={() => setSelectedSubject(s.id)}>
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <h3 className="font-bold text-gray-900">{s.name}</h3>
+                    <p className="text-xs text-gray-500 mt-0.5">{s.level}</p>
+                  </div>
+                  {s.id === selectedSubject && <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded uppercase tracking-wider">Active</span>}
+                </div>
+                <div className="flex justify-between items-center pt-2 border-t border-gray-100 text-xs font-semibold text-gray-600">
+                   <span>Set as active dashboard context</span>
+                   <ChevronRight className="h-4 w-4" />
+                </div>
+              </div>
+            ))}
+          </div>
+        </motion.div>
+
+        {/* 4. Syllabus Coverage */}
+        {data.coverage && (
+          <motion.div variants={itemVars} className="mb-10">
+            <h2 className={sectionHeader}>Syllabus Gaps</h2>
+            <div className={cn(materialCard, cardPadding)}>
+              <div className="flex justify-between items-center mb-4">
+                <span className="text-sm font-bold text-gray-800">Uncovered Topics ({data.coverage.uncovered.length})</span>
+                <span className="text-xs font-semibold text-gray-500 bg-gray-100 px-2 py-1 rounded">{data.coverage.covered_count} / {data.coverage.total_count} covered</span>
+              </div>
+              
+              {data.coverage.uncovered.length > 0 ? (
+                <div className="flex flex-wrap gap-2">
+                  {data.coverage.uncovered.slice(0, 8).map(topic => (
+                    <span key={topic.topic} className="bg-red-50 border border-red-100 text-red-800 text-[11px] font-bold px-3 py-1.5 rounded-md">
+                      {topic.topic}
+                    </span>
+                  ))}
+                  {data.coverage.uncovered.length > 8 && (
+                    <span className="bg-gray-50 border border-gray-200 text-gray-500 text-[11px] font-bold px-3 py-1.5 rounded-md">
+                      +{data.coverage.uncovered.length - 8} more
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-green-600 font-medium flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4" /> You've attempted every topic in the syllabus!
+                </p>
+              )}
             </div>
+          </motion.div>
+        )}
+
+        {/* 5. Recent Activity Feed */}
+        <motion.div variants={itemVars} className="mb-10">
+          <div className="flex items-center justify-between mb-3 px-1">
+            <h2 className={cn(sectionHeader, "mb-0")}>Activity Log</h2>
+            <Link href="/history" className="text-xs font-bold text-blue-600 hover:text-blue-800 uppercase tracking-widest">View All</Link>
           </div>
-        </div>
-
-        {/* Sidebar */}
-        <div className="space-y-4">
-          {/* Weak topics */}
-          <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-            <h2 className="mb-4 font-semibold">Weak Topics</h2>
-            {weakTopics.length === 0 ? (
-              <p className="text-sm text-gray-400">No data yet.</p>
-            ) : (
-              <ul className="space-y-3">
-                {weakTopics.slice(0, 6).map((t) => (
-                  <li key={t.topic}>
-                    <div className="mb-1 flex justify-between text-xs">
-                      <span className="truncate text-gray-700">{t.topic}</span>
-                      <span className="ml-2 shrink-0 text-red-500">
-                        {Math.round(t.fail_ratio * 100)}% fail
-                      </span>
-                    </div>
-                    <ProgressBar value={t.fail_ratio * 100} color="bg-red-400" />
-                  </li>
-                ))}
-              </ul>
-            )}
+          <div className={cn(materialCard, "overflow-hidden")}>
+             {data.recent_sessions.length === 0 ? (
+                <div className="p-8 text-center bg-gray-50/50">
+                  <p className="text-sm text-gray-500 font-medium">No activity logged.</p>
+                </div>
+             ) : (
+                <div className="divide-y divide-gray-100">
+                  {data.recent_sessions.slice(0, 5).map(s => {
+                    const isGood = s.percentage != null && s.percentage >= 70;
+                    const isBad = s.percentage != null && s.percentage < 40;
+                    return (
+                      <div key={s.session_id} className="p-4 flex items-center gap-4 hover:bg-gray-50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                             <span className="bg-gray-100 text-gray-600 text-[10px] uppercase font-bold tracking-widest px-1.5 py-0.5 rounded flex items-center gap-1">
+                               {s.mode === "exam" ? <Clock className="h-3 w-3" /> : <Target className="h-3 w-3" />}
+                               {s.mode}
+                             </span>
+                             <span className="text-xs text-gray-400 font-medium">
+                               {s.completed_at ? new Date(s.completed_at).toLocaleDateString() : 'N/A'}
+                             </span>
+                          </div>
+                          <p className="text-sm font-bold text-gray-900 truncate">
+                            {s.subject_name || "Unknown"} P{s.paper_number}
+                          </p>
+                        </div>
+                        <div className="flex flex-col items-end gap-1">
+                          {s.percentage != null ? (
+                            <span className={cn("text-sm font-black", isGood ? "text-green-600" : isBad ? "text-red-600" : "text-amber-600")}>
+                               {s.percentage}%
+                            </span>
+                          ) : (
+                            <span className="text-sm font-black text-gray-800">{s.score}/{s.total_marks}</span>
+                          )}
+                          <Link href={`/exam/${s.session_id}/results`} className="text-[10px] font-bold text-blue-600 hover:underline">
+                            Review Results
+                          </Link>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+             )}
           </div>
+        </motion.div>
 
-          {/* Coverage */}
-          {coverage && (
-            <>
-              {coverage.uncovered.length > 0 && (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-5">
-                  <h2 className="mb-3 font-semibold text-amber-800">
-                    Uncovered Topics ({coverage.uncovered.length})
-                  </h2>
-                  <ul className="space-y-1">
-                    {coverage.uncovered.slice(0, 5).map((t) => (
-                      <li
-                        key={t.topic}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="truncate text-amber-700">{t.topic}</span>
-                        <Link
-                          href={`/practice?topic=${encodeURIComponent(t.topic)}`}
-                          className="ml-2 shrink-0 text-xs text-blue-600 hover:underline"
-                        >
-                          Practice
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
+        {/* 6. Streak Tracker (Visual 7-Day Block) */}
+        <motion.div variants={itemVars} className="mb-12">
+          <h2 className={sectionHeader}>Consistency</h2>
+          <div className={cn(materialCard, cardPadding)}>
+             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+                <div>
+                   <div className="flex items-center gap-2 mb-1">
+                     <Flame className="h-6 w-6 text-orange-500" strokeWidth={2.5} fill="#f97316" />
+                     <span className="text-2xl font-black text-gray-900">{streak.current} Days</span>
+                   </div>
+                   <p className="text-sm text-gray-500 font-medium">Current active streak. Longest: {streak.longest}d</p>
                 </div>
-              )}
+                
+                {/* Visual 7 Day Mock Tracker */}
+                <div className="flex gap-2">
+                   {[...Array(7)].map((_, i) => {
+                     // Fill blocks based on streak, cap at 7
+                     const isActive = i < Math.min(streak.current, 7);
+                     return (
+                       <div 
+                         key={i} 
+                         className={cn(
+                           "flex-1 sm:w-10 h-10 rounded-lg border flex items-center justify-center shadow-sm",
+                           isActive ? "bg-orange-50 border-orange-200 text-orange-500" : "bg-gray-50 border-gray-100 text-gray-300"
+                         )}
+                       >
+                         {isActive && <Flame className="h-5 w-5" fill="currentColor" />}
+                       </div>
+                     )
+                   })}
+                </div>
+             </div>
+          </div>
+        </motion.div>
 
-              {coverage.covered.length > 0 && (
-                <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
-                  <h2 className="mb-3 font-semibold">
-                    Covered Topics ({coverage.covered_count}/{coverage.total_count})
-                  </h2>
-                  <ul className="space-y-1">
-                    {coverage.covered.slice(0, 8).map((t) => (
-                      <li
-                        key={t.topic}
-                        className="flex items-center justify-between text-sm"
-                      >
-                        <span className="truncate text-gray-700">{t.topic}</span>
-                        {t.attempt_count > 0 && (
-                          <span className="ml-2 shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-xs text-gray-500">
-                            {t.attempt_count}×
-                          </span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </div>
+      </motion.div>
     </div>
   );
 }

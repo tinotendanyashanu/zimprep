@@ -228,6 +228,43 @@ def update_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, 
     return result.data[0]
 
 
+@router.delete("/papers/{paper_id}")
+def delete_paper(paper_id: str) -> dict[str, Any]:
+    """
+    Delete a paper and all its questions. Also removes the PDF from storage.
+    """
+    supabase = get_supabase()
+
+    # Get paper to find storage path
+    paper = (
+        supabase.table("paper")
+        .select("id, pdf_url")
+        .eq("id", paper_id)
+        .maybe_single()
+        .execute()
+    )
+    if not paper or not paper.data:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    # Delete questions first (FK constraint)
+    supabase.table("question").delete().eq("paper_id", paper_id).execute()
+
+    # Delete paper record
+    supabase.table("paper").delete().eq("id", paper_id).execute()
+
+    # Best-effort: remove PDF from storage
+    try:
+        pdf_url: str = paper.data.get("pdf_url", "")
+        # URL format: .../storage/v1/object/public/papers/<paper_id>/filename.pdf
+        if "/papers/" in pdf_url:
+            storage_path = pdf_url.split("/papers/", 1)[1]
+            supabase.storage.from_(PDF_BUCKET).remove([storage_path])
+    except Exception as exc:
+        logger.warning("Could not remove PDF from storage: %s", exc)
+
+    return {"deleted": paper_id}
+
+
 @router.post("/paystack/create-plans")
 def create_paystack_plans() -> dict[str, Any]:
     """

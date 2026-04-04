@@ -9,6 +9,8 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 import { MathText } from "@/components/math-text";
+import { Button } from "@/components/ui/button";
+import { motion, AnimatePresence } from "framer-motion";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -98,8 +100,11 @@ function PracticeFeedback({ result, question, onNext }: {
   const msg = pct >= 1 ? "Perfect! 🎉" : pct >= 0.7 ? "Well done! ✓" : pct >= 0.4 ? "Getting there 📖" : "Keep practising 💪";
 
   return (
-    <div className={cn(
-      "rounded-xl border p-5 space-y-4 animate-in slide-in-from-bottom-3 duration-300",
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={cn(
+      "rounded-2xl border p-6 space-y-4 shadow-sm",
       isGood ? "border-green-200 bg-green-50/60" : "border-red-100 bg-red-50/40"
     )}>
       <div className="flex items-center justify-between">
@@ -148,13 +153,14 @@ function PracticeFeedback({ result, question, onNext }: {
         </div>
       )}
 
-      <button
+      <Button
         onClick={onNext}
-        className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition"
+        size="lg"
+        className="w-full mt-4"
       >
         Next Question →
-      </button>
-    </div>
+      </Button>
+    </motion.div>
   );
 }
 
@@ -269,7 +275,7 @@ export default function ExamSessionPage() {
     if (loading || session?.mode !== "exam") return;
     const interval = setInterval(() => {
       setTimeLeft((t) => {
-        if (t <= 1) { clearInterval(interval); handleSubmitExam(answersRef.current, answerImagesRef.current); return 0; }
+        if (t <= 1) { clearInterval(interval); handleSubmitExam(answersRef.current); return 0; }
         return t - 1;
       });
     }, 1000);
@@ -307,7 +313,7 @@ export default function ExamSessionPage() {
   }, [questions, currentIdx]);
 
   const handleSubmitExam = useCallback(
-    async (currentAnswers: Record<string, string>, currentImages: Record<string, string>) => {
+    async (currentAnswers: Record<string, string>) => {
       if (submitting) return;
       setSubmitting(true);
       try {
@@ -473,7 +479,16 @@ export default function ExamSessionPage() {
             })}
           </div>
 
-          {/* Question header */}
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={currentQ.id}
+              initial={{ opacity: 0, x: 8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -8 }}
+              transition={{ duration: 0.15, ease: "easeOut" }}
+              className="space-y-6"
+            >
+              {/* Question header */}
           <div className="space-y-3">
             <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -576,18 +591,15 @@ export default function ExamSessionPage() {
 
           {/* Practice submit */}
           {!isExamMode && !practiceResult && (
-            <button
+            <Button
               onClick={handleSubmitPractice}
               disabled={practiceSubmitting || (!answers[currentQ.id]?.trim() && !answerImages[currentQ.id])}
-              className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+              isLoading={practiceSubmitting}
+              size="lg"
+              className="w-full"
             >
-              {practiceSubmitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                  Marking…
-                </span>
-              ) : "Submit Answer"}
-            </button>
+              {practiceSubmitting ? "Marking..." : "Submit Answer"}
+            </Button>
           )}
 
           {/* Practice feedback */}
@@ -602,22 +614,28 @@ export default function ExamSessionPage() {
           {/* Navigation */}
           {!practiceResult && (
             <div className="flex gap-3 pt-2">
-              <button
+              <Button
                 disabled={currentIdx === 0}
                 onClick={() => { setCurrentIdx((i) => i - 1); setPracticeResult(null); setAnswerTab("text"); }}
-                className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
+                variant="outline"
+                size="lg"
+                className="flex-1"
               >
                 ← Previous
-              </button>
-              <button
+              </Button>
+              <Button
                 disabled={currentIdx === questions.length - 1}
                 onClick={() => { setCurrentIdx((i) => i + 1); setPracticeResult(null); setAnswerTab("text"); }}
-                className="flex-1 py-2.5 rounded-xl border border-border text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-30 disabled:cursor-not-allowed transition"
+                variant="outline"
+                size="lg"
+                className="flex-1"
               >
                 Next →
-              </button>
+              </Button>
             </div>
           )}
+          </motion.div>
+          </AnimatePresence>
         </main>
       </div>
 
@@ -635,19 +653,22 @@ export default function ExamSessionPage() {
               </p>
             </div>
             <div className="flex gap-3">
-              <button
-                onClick={() => { setShowConfirm(false); handleSubmitExam(answersRef.current, answerImagesRef.current); }}
-                disabled={submitting}
-                className="flex-1 py-2.5 bg-primary text-primary-foreground rounded-xl font-semibold text-sm hover:opacity-90 disabled:opacity-50 transition"
+              <Button
+                onClick={() => { setShowConfirm(false); handleSubmitExam(answersRef.current); }}
+                isLoading={submitting}
+                className="flex-1"
+                size="lg"
               >
                 {submitting ? "Submitting…" : "Confirm"}
-              </button>
-              <button
+              </Button>
+              <Button
                 onClick={() => setShowConfirm(false)}
-                className="flex-1 py-2.5 border border-border rounded-xl text-sm font-medium hover:bg-muted transition"
+                variant="outline"
+                className="flex-1"
+                size="lg"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>

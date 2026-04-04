@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { Button } from "@/components/ui/button";
 import { CheckCircle2, BookOpen, GraduationCap, School } from "lucide-react";
 
 export default function SubjectsPage() {

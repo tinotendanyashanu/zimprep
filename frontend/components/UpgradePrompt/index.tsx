@@ -48,7 +48,7 @@ export function UpgradePrompt({ detail, onDismiss }: Props) {
         {isQuotaExceeded && detail.limit !== undefined && (
           <div className="mb-5">
             <div className="mb-1 flex justify-between text-xs text-gray-500">
-              <span>Today's usage</span>
+              <span>Today&apos;s usage</span>
               <span>
                 {detail.used}/{detail.limit}
               </span>
