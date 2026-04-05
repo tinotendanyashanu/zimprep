@@ -16,10 +16,18 @@ router = APIRouter()
 
 
 @router.get("/subjects")
-def list_subjects() -> list[dict[str, Any]]:
-    """List all subjects with a count of available (ready) papers."""
+def list_subjects(
+    exam_board: Optional[str] = Query(default=None),
+    level: Optional[str] = Query(default=None),
+) -> list[dict[str, Any]]:
+    """List subjects, optionally filtered by exam_board and/or level."""
     supabase = get_supabase()
-    subjects = supabase.table("subject").select("id, name, level").order("name").execute()
+    query = supabase.table("subject").select("id, name, level, exam_board").order("name")
+    if exam_board:
+        query = query.eq("exam_board", exam_board)
+    if level:
+        query = query.eq("level", level)
+    subjects = query.execute()
 
     # Count ready papers per subject
     ready_papers = (

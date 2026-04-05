@@ -11,6 +11,7 @@ export type Subject = {
   id: string;
   name: string;
   level: string;
+  exam_board: "zimsec" | "cambridge";
   paper_count: number;
 };
 
@@ -175,8 +176,13 @@ async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 // ── API functions ──────────────────────────────────────────────────────────────
 
-export const getSubjects = () =>
-  apiFetch<Subject[]>("/papers/subjects");
+export const getSubjects = (exam_board?: string, level?: string) => {
+  const params = new URLSearchParams();
+  if (exam_board) params.set("exam_board", exam_board);
+  if (level) params.set("level", level);
+  const qs = params.toString();
+  return apiFetch<Subject[]>(`/papers/subjects${qs ? `?${qs}` : ""}`);
+};
 
 export const getPapersForSubject = (subjectId: string) =>
   apiFetch<Paper[]>(`/papers/subjects/${subjectId}/papers`);

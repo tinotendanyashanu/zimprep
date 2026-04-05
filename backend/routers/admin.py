@@ -63,6 +63,7 @@ async def upload_paper(
     subject_id: Optional[str] = Form(None),
     subject_name: Optional[str] = Form(None),
     level: Optional[str] = Form(None),
+    exam_board: Optional[str] = Form("zimsec"),
     year: int = Form(...),
     paper_number: int = Form(...),
     duration_minutes: int = Form(120),
@@ -83,8 +84,12 @@ async def upload_paper(
                 detail="Provide either subject_id, or both subject_name and level",
             )
 
-        if level not in ("Grade7", "O", "A"):
-            raise HTTPException(status_code=422, detail="level must be one of: Grade7, O, A")
+        valid_levels = ("Grade7", "O", "A", "IGCSE", "AS_Level", "A_Level")
+        if level not in valid_levels:
+            raise HTTPException(status_code=422, detail=f"level must be one of: {', '.join(valid_levels)}")
+
+        if exam_board not in ("zimsec", "cambridge"):
+            raise HTTPException(status_code=422, detail="exam_board must be 'zimsec' or 'cambridge'")
 
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
@@ -103,6 +108,7 @@ async def upload_paper(
                 .select("id")
                 .eq("name", subject_name)
                 .eq("level", level)
+                .eq("exam_board", exam_board)
                 .limit(1)
                 .execute()
             )
@@ -112,7 +118,7 @@ async def upload_paper(
             else:
                 created_subject = (
                     supabase.table("subject")
-                    .insert({"name": subject_name, "level": level})
+                    .insert({"name": subject_name, "level": level, "exam_board": exam_board})
                     .execute()
                 )
                 if not created_subject.data:

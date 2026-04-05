@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, BookOpen, GraduationCap, School } from "lucide-react";
 
 export default function SubjectsPage() {
-  const levels = [
+  const [activeBoard, setActiveBoard] = useState<"zimsec" | "cambridge">("zimsec");
+
+  const zimsecLevels = [
     {
       title: "Grade 7 (ZIMSEC)",
       icon: <School className="w-6 h-6 text-zinc-600"/>,
@@ -42,15 +45,61 @@ export default function SubjectsPage() {
     }
   ];
 
+  const cambridgeLevels = [
+    {
+      title: "Cambridge IGCSE",
+      icon: <BookOpen className="w-6 h-6 text-blue-600"/>,
+      description: "Cambridge IGCSE — internationally recognised O Level equivalent.",
+      subjects: [
+        { name: "Mathematics", code: "0580", papers: ["Paper 1 (Core)", "Paper 2 (Extended)", "Paper 4 (Extended)"], status: "Coming Soon" },
+        { name: "English as a Second Language", code: "0510", papers: ["Paper 1 (Reading)", "Paper 2 (Writing)", "Paper 3 (Listening)"], status: "Coming Soon" },
+        { name: "Biology", code: "0610", papers: ["Paper 1 (MCQ)", "Paper 2 (Theory)", "Paper 6 (Alt Practical)"], status: "Coming Soon" },
+        { name: "Chemistry", code: "0620", papers: ["Paper 1 (MCQ)", "Paper 2 (Theory)", "Paper 6 (Alt Practical)"], status: "Coming Soon" },
+        { name: "Physics", code: "0625", papers: ["Paper 1 (MCQ)", "Paper 2 (Theory)", "Paper 6 (Alt Practical)"], status: "Coming Soon" },
+        { name: "History", code: "0470", papers: ["Paper 1 (Core)", "Paper 2 (Depth Study)"], status: "Coming Soon" },
+      ]
+    },
+    {
+      title: "Cambridge AS & A Level",
+      icon: <GraduationCap className="w-6 h-6 text-blue-600"/>,
+      description: "Cambridge International AS & A Level — university entry preparation.",
+      subjects: [
+        { name: "Mathematics", code: "9709", papers: ["Pure Mathematics 1", "Pure Mathematics 2", "Statistics", "Mechanics"], status: "Coming Soon" },
+        { name: "Physics", code: "9702", papers: ["Paper 1 (MCQ)", "Paper 2 (AS Structured)", "Paper 4 (A Level)", "Paper 5 (Practical)"], status: "Coming Soon" },
+        { name: "Chemistry", code: "9701", papers: ["Paper 1 (MCQ)", "Paper 2 (AS Structured)", "Paper 4 (A Level)", "Paper 5 (Practical)"], status: "Coming Soon" },
+        { name: "Biology", code: "9700", papers: ["Paper 1 (MCQ)", "Paper 2 (AS Structured)", "Paper 4 (A Level)", "Paper 5 (Practical)"], status: "Coming Soon" },
+        { name: "Economics", code: "9708", papers: ["Paper 1 (MCQ)", "Paper 2 (Data Response)", "Paper 3 (Multiple Choice)", "Paper 4 (Essays)"], status: "Coming Soon" },
+        { name: "Accounting", code: "9706", papers: ["Paper 1 (MCQ)", "Paper 2 (Structured)", "Paper 3 (A Level)"], status: "Coming Soon" },
+      ]
+    }
+  ];
+
+  const levels = activeBoard === "zimsec" ? zimsecLevels : cambridgeLevels;
+
   return (
     <div className="flex flex-col min-h-screen pt-24 md:pt-32">
       <main className="flex-1">
         <section className="px-6 pb-16">
-          <div className="max-w-4xl mx-auto text-center mb-16">
+          <div className="max-w-4xl mx-auto text-center mb-12">
             <h1 className="text-calm-h1 mb-6 text-foreground">Subjects & Coverage</h1>
-            <p className="text-calm-body max-w-2xl mx-auto">
-              Comprehensive coverage for every critical stage: Grade 7, Form 4, and Form 6.
+            <p className="text-calm-body max-w-2xl mx-auto mb-8">
+              Full coverage for both ZIMSEC and Cambridge exam boards.
             </p>
+            {/* Board toggle */}
+            <div className="inline-flex rounded-full border border-border bg-zinc-50 p-1 gap-1">
+              <button
+                onClick={() => setActiveBoard("zimsec")}
+                className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${activeBoard === "zimsec" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                🇿🇼 ZIMSEC
+              </button>
+              <button
+                onClick={() => setActiveBoard("cambridge")}
+                className={`px-6 py-2 rounded-full text-sm font-semibold transition-all ${activeBoard === "cambridge" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                🎓 Cambridge
+              </button>
+            </div>
           </div>
 
           <div className="max-w-4xl mx-auto space-y-16">
@@ -106,9 +155,12 @@ export default function SubjectsPage() {
           <div className="max-w-3xl mx-auto mt-20 p-6 bg-blue-50 border border-blue-100 rounded-xl flex items-start gap-4">
               <CheckCircle2 className="w-6 h-6 text-blue-600 shrink-0 mt-1" />
               <div>
-                  <h4 className="font-bold text-blue-900 mb-1">Aligned to Official Syllabus</h4>
+                  <h4 className="font-bold text-blue-900 mb-1">Aligned to Official Syllabuses</h4>
                   <p className="text-sm text-blue-800/80 leading-relaxed">
-                      All content on ZimPrep is created with strict adherence to the latest ZIMSEC curriculum updates for Grade 7, O-Level, and A-Level. We do not use generic international content; everything is tailored for the Zimbabwean student.
+                    {activeBoard === "zimsec"
+                      ? "All ZIMSEC content is strictly aligned to the latest Zimbabwe School Examinations Council curriculum. Everything is tailored for the Zimbabwean student — no generic international content."
+                      : "All Cambridge content is aligned to the latest Cambridge Assessment International Education (CAIE) syllabuses. Papers and marking follow Cambridge examiner standards."
+                    }
                   </p>
               </div>
           </div>

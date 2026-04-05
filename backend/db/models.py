@@ -8,7 +8,8 @@ from pydantic import BaseModel
 class Subject(BaseModel):
     id: str
     name: str
-    level: str  # 'Grade7' | 'O' | 'A'
+    level: str  # ZIMSEC: 'Grade7'|'O'|'A'  Cambridge: 'IGCSE'|'AS_Level'|'A_Level'
+    exam_board: str  # 'zimsec' | 'cambridge'
     created_at: datetime
 
 
@@ -58,6 +59,7 @@ class Student(BaseModel):
     email: str
     name: str
     level: str
+    exam_board: str  # 'zimsec' | 'cambridge'
     subscription_tier: str  # 'starter' | 'standard' | 'prestige'
     created_at: datetime
 

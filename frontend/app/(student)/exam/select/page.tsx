@@ -24,6 +24,9 @@ const LEVEL_LABELS: Record<string, string> = {
   Grade7: "Grade 7",
   O: "O Level",
   A: "A Level",
+  IGCSE: "Cambridge IGCSE",
+  AS_Level: "Cambridge AS Level",
+  A_Level: "Cambridge A Level",
 };
 
 export default function ExamSelectPage() {
@@ -40,18 +43,23 @@ export default function ExamSelectPage() {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get student ID and load subjects on mount
+  // Get student ID + profile, then load subjects filtered to their board+level
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setStudentId(user.id);
-    });
-
     setLoading(true);
-    getSubjects()
-      .then(setSubjects)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return;
+      setStudentId(user.id);
+      const { data: student } = await supabase
+        .from("student")
+        .select("exam_board, level")
+        .eq("id", user.id)
+        .single();
+      getSubjects(student?.exam_board, student?.level)
+        .then(setSubjects)
+        .catch((e) => setError(e.message))
+        .finally(() => setLoading(false));
+    });
   }, []);
 
   async function handleSelectSubject(subject: Subject) {
