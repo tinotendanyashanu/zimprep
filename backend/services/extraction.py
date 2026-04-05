@@ -2,17 +2,18 @@
 PDF Extraction Pipeline
 
 Renders each PDF page as a PNG image (using PyMuPDF) and sends them to
-Claude's vision API for structured question extraction. This approach handles
-both scanned and digital PDFs, and preserves all mathematical notation as LaTeX.
+Mistral's vision API (Pixtral) for structured question extraction. This approach
+handles both scanned and digital PDFs, and preserves all mathematical notation
+as LaTeX.
 
 Math notation:
   Inline: \\( ... \\)   e.g. \\(x^2 + 2x + 1\\)
   Display: \\[ ... \\]  e.g. \\[\\frac{a}{b}\\]
 
 Diagram pipeline:
-  1. Claude returns image_bbox [x0,y0,x1,y1] as page fractions for each diagram
+  1. Pixtral returns image_bbox [x0,y0,x1,y1] as page fractions for each diagram
   2. We crop that region at high DPI using PyMuPDF
-  3. We ask Claude to redraw the cropped region as clean SVG
+  3. We ask Pixtral to redraw the cropped region as clean SVG
   4. SVG (or fallback cropped PNG) is stored and linked to the question
 """
 from __future__ import annotations
@@ -23,8 +24,8 @@ import logging
 import os
 from typing import Any
 
-import anthropic
 import fitz  # PyMuPDF
+from mistralai import Mistral
 
 from db.client import get_supabase
 
@@ -83,7 +84,8 @@ Rules:
 - Use <text> for all labels, font-family="serif", appropriate font-size
 - Use <line>, <path>, <circle>, <rect>, <polygon> for shapes
 - Use <marker> with arrowhead for arrows
-- Continue directly from the <svg tag already started — do NOT repeat it"""
+- Output ONLY the raw SVG — start your response with <svg and end with </svg>
+- No explanation, no markdown fences, no preamble"""
 
 
 def _render_pages(pdf_bytes: bytes, dpi: int = 150) -> list[bytes]:
@@ -135,50 +137,38 @@ def _crop_diagram_region(
 
 def _redraw_as_svg(image_bytes: bytes) -> str | None:
     """
-    Ask Claude to recreate a diagram image as clean SVG.
-    Uses assistant prefill (<svg) to force SVG output directly.
+    Ask Pixtral to recreate a diagram image as clean SVG.
     Returns the SVG string if successful, otherwise None.
     """
     try:
-        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
         b64 = base64.standard_b64encode(image_bytes).decode()
+        data_url = f"data:image/png;base64,{b64}"
 
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        response = client.chat.complete(
+            model="pixtral-12b-2409",
             max_tokens=6000,
             messages=[
                 {
                     "role": "user",
                     "content": [
-                        {
-                            "type": "image",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "image/png",
-                                "data": b64,
-                            },
-                        },
+                        {"type": "image_url", "image_url": {"url": data_url}},
                         {"type": "text", "text": SVG_REDRAW_PROMPT},
                     ],
-                },
-                # Prefill forces Claude to start the response with <svg
-                {
-                    "role": "assistant",
-                    "content": "<svg",
                 },
             ],
         )
 
-        # The response continues from where our prefill left off
-        tail = msg.content[0].text
-        raw = "<svg" + tail
+        raw = response.choices[0].message.content or ""
+
+        # Strip any markdown fences if the model wrapped its output
+        raw = _strip_json_fences(raw) if raw.startswith("```") else raw.strip()
 
         # Extract from first <svg to last </svg>
         start = raw.find("<svg")
         end = raw.rfind("</svg>")
         if start != -1 and end != -1:
-            result = raw[start: end + len("</svg>")]
-            return result
+            return raw[start: end + len("</svg>")]
 
         logger.warning("SVG redraw did not return valid SVG. Raw (first 300 chars): %s", raw[:300])
         return None
@@ -300,21 +290,19 @@ def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
     return []
 
 
-def _call_claude_for_pages(
-    client: anthropic.Anthropic,
+def _call_mistral_for_pages(
+    client: Mistral,
     page_images: list[bytes],
     page_offset: int,
 ) -> tuple[list[dict[str, Any]], bool]:
     """
-    Send a batch of page images to Claude and return (questions, hit_token_limit).
+    Send a batch of page images to Pixtral and return (questions, hit_token_limit).
     """
     content: list[dict] = []
     for i, img_bytes in enumerate(page_images):
         b64 = base64.standard_b64encode(img_bytes).decode()
-        content.append({
-            "type": "image",
-            "source": {"type": "base64", "media_type": "image/png", "data": b64},
-        })
+        data_url = f"data:image/png;base64,{b64}"
+        content.append({"type": "image_url", "image_url": {"url": data_url}})
         content.append({"type": "text", "text": f"[Page {page_offset + i + 1}]"})
 
     content.append({
@@ -322,15 +310,18 @@ def _call_claude_for_pages(
         "text": "Extract all questions from these exam paper pages. Return JSON array only.",
     })
 
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
+    response = client.chat.complete(
+        model="pixtral-large-latest",
         max_tokens=8192,
-        system=EXTRACTION_SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": content}],
+        messages=[
+            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": content},
+        ],
     )
 
-    raw = _strip_json_fences(message.content[0].text)
-    hit_limit = message.stop_reason == "max_tokens"
+    choice = response.choices[0]
+    raw = _strip_json_fences(choice.message.content or "")
+    hit_limit = choice.finish_reason == "length"
     return _recover_partial_json_array(raw), hit_limit
 
 
@@ -338,14 +329,14 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
     """
     Extract questions from all pages using adaptive batching.
 
-    Starts with _INITIAL_BATCH_SIZE pages per Claude call. If a call hits the
+    Starts with _INITIAL_BATCH_SIZE pages per Pixtral call. If a call hits the
     output token limit the batch is automatically halved and retried — down to
     1 page at a time if needed — so extraction always completes regardless of
     paper density. After a successful smaller batch the size grows back up.
 
     Admin just uploads a PDF; this function handles everything.
     """
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
     results: list[dict[str, Any]] = []
 
     i = 0
@@ -353,7 +344,7 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
 
     while i < len(page_images):
         batch = page_images[i: i + batch_size]
-        questions, hit_limit = _call_claude_for_pages(client, batch, page_offset=i)
+        questions, hit_limit = _call_mistral_for_pages(client, batch, page_offset=i)
 
         if hit_limit and batch_size > 1:
             # Too dense — halve and retry the same position
@@ -406,9 +397,9 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             url = _upload_page_image(img_bytes, paper_id, idx)
             page_urls.append(url)
 
-        # 3. Extract questions via Claude vision
+        # 3. Extract questions via Pixtral vision
         questions = _parse_questions_from_pages(page_images)
-        logger.info("Claude extracted %d questions for paper %s", len(questions), paper_id)
+        logger.info("Mistral extracted %d questions for paper %s", len(questions), paper_id)
 
         # 4 & 5. Process diagrams and build DB rows
         rows = []

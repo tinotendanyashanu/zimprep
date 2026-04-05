@@ -16,7 +16,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-import anthropic
+from mistralai import Mistral
 
 from db.client import get_supabase
 
@@ -208,9 +208,10 @@ def mark_attempt(attempt_id: str) -> None:
         _update_attempt(attempt_id, result, marks)
         return
 
-    # ── Claude marking ─────────────────────────────────────────────────────────
-    model = "claude-haiku-4-5-20251001" if marks <= 3 else "claude-sonnet-4-6"
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    # ── Mistral marking ────────────────────────────────────────────────────────
+    # mistral-small for ≤3 mark questions (fast + cheap), mistral-large for longer answers
+    model = "mistral-small-latest" if marks <= 3 else "mistral-large-latest"
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
 
     prompt = (
         f"Subject: {subject['name']} ({subject['level']})\n"
@@ -219,14 +220,16 @@ def mark_attempt(attempt_id: str) -> None:
     )
 
     try:
-        message = client.messages.create(
+        response = client.chat.complete(
             model=model,
             max_tokens=1024,
-            system=MARKING_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {"role": "system", "content": MARKING_SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ],
         )
-        raw = message.content[0].text.strip()
-        # Strip markdown fences if Claude wrapped the JSON anyway
+        raw = (response.choices[0].message.content or "").strip()
+        # Strip markdown fences if the model wrapped the JSON
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
@@ -234,7 +237,7 @@ def mark_attempt(attempt_id: str) -> None:
             raw = raw.strip()
         result = json.loads(raw)
     except Exception as exc:
-        logger.error("Claude marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
+        logger.error("Mistral marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
         result = dict(_FALLBACK_RESULT)
 
     _update_attempt(attempt_id, result, marks)
