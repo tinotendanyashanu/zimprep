@@ -1,8 +1,8 @@
 """
 PDF Extraction Pipeline
 
-Renders each PDF page as a PNG image (using PyMuPDF) and sends them to
-Mistral's vision API (Pixtral) for structured question extraction. This approach
+Renders each PDF page as a JPEG image (using PyMuPDF) and sends them to
+Google Gemini 2.0 Flash for structured question extraction. This approach
 handles both scanned and digital PDFs, and preserves all mathematical notation
 as LaTeX.
 
@@ -11,9 +11,9 @@ Math notation:
   Display: \\[ ... \\]  e.g. \\[\\frac{a}{b}\\]
 
 Diagram pipeline:
-  1. Pixtral returns image_bbox [x0,y0,x1,y1] as page fractions for each diagram
+  1. Gemini returns image_bbox [x0,y0,x1,y1] as page fractions for each diagram
   2. We crop that region at high DPI using PyMuPDF
-  3. We ask Pixtral to redraw the cropped region as clean SVG
+  3. We ask Gemini to redraw the cropped region as clean SVG
   4. SVG (or fallback cropped PNG) is stored and linked to the question
 """
 from __future__ import annotations
@@ -26,8 +26,8 @@ import time
 from typing import Any
 
 import fitz  # PyMuPDF
-from mistralai.client import Mistral
-from mistralai.client.errors.sdkerror import SDKError
+from google import genai
+from google.genai import types
 
 from db.client import get_supabase
 
@@ -37,49 +37,29 @@ _MAX_RETRIES = 4
 _RETRY_BASE_DELAY = 2  # seconds; doubles each attempt (2, 4, 8, 16)
 
 
-_RETRYABLE_STATUS = {"429", "502", "503", "504"}
-
-
-def _is_retryable(exc: SDKError) -> bool:
-    s = str(exc)
-    return any(code in s for code in _RETRYABLE_STATUS) or "rate_limited" in s.lower()
-
-
-def _retry_after_seconds(exc: SDKError) -> int | None:
-    """Return the Retry-After header value if Mistral included one, else None."""
-    try:
-        raw = exc.raw_response
-        if raw is not None and hasattr(raw, "headers"):
-            val = raw.headers.get("retry-after") or raw.headers.get("Retry-After")
-            if val:
-                return int(val)
-    except Exception:
-        pass
-    return None
-
-
-def _mistral_call_with_retry(fn, *args, **kwargs):
+def _gemini_call_with_retry(fn, *args, **kwargs):
     """
-    Call a Mistral SDK function, retrying on 429 / 502 / 503 / 504 responses.
-    Respects Retry-After when present; falls back to exponential back-off.
+    Call a Gemini function, retrying on 429 / rate-limit / quota errors.
+    Falls back to exponential back-off when no retry delay is specified.
     """
     delay = _RETRY_BASE_DELAY
     for attempt in range(_MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
-        except SDKError as exc:
-            if _is_retryable(exc) and attempt < _MAX_RETRIES - 1:
-                wait = _retry_after_seconds(exc) or delay
-                status = "rate-limit" if "429" in str(exc) else "gateway error"
+        except Exception as exc:
+            msg = str(exc).lower()
+            is_retryable = "429" in msg or "quota" in msg or "rate" in msg or "resource exhausted" in msg
+            if is_retryable and attempt < _MAX_RETRIES - 1:
                 logger.warning(
-                    "Mistral %s (attempt %d/%d) — waiting %ds",
-                    status, attempt + 1, _MAX_RETRIES, wait,
+                    "Gemini rate-limit (attempt %d/%d) — waiting %ds",
+                    attempt + 1, _MAX_RETRIES, delay,
                 )
-                time.sleep(wait)
-                delay = max(delay * 2, wait + 1)
+                time.sleep(delay)
+                delay *= 2
                 continue
             raise
-    raise RuntimeError("Mistral call failed after all retries")
+    raise RuntimeError("Gemini call failed after all retries")
+
 
 EXTRACTION_SYSTEM_PROMPT = r"""You are an expert at reading ZIMSEC and Cambridge past exam papers from images.
 Extract every question from the provided exam paper page images and return a single JSON array.
@@ -142,7 +122,7 @@ def _render_pages(pdf_bytes: bytes, dpi: int = 100) -> list[bytes]:
     """
     Render every PDF page to JPEG bytes at the given DPI.
 
-    100 DPI + JPEG at 80 % quality is sufficient for Pixtral to read text
+    100 DPI + JPEG at 80 % quality is sufficient for Gemini to read text
     and is ~10× smaller than 150 DPI PNG, cutting token usage dramatically.
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -192,33 +172,22 @@ def _crop_diagram_region(
 
 def _redraw_as_svg(image_bytes: bytes) -> str | None:
     """
-    Ask Pixtral to recreate a diagram image as clean SVG.
+    Ask Gemini to recreate a diagram image as clean SVG.
     Returns the SVG string if successful, otherwise None.
     """
     try:
-        client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=120_000)
-        b64 = base64.standard_b64encode(image_bytes).decode()
-        data_url = f"data:image/png;base64,{b64}"
+        client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
 
-        response = _mistral_call_with_retry(
-            client.chat.complete,
-            model="pixtral-12b-2409",
-            max_tokens=6000,
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "image_url", "image_url": {"url": data_url}},
-                        {"type": "text", "text": SVG_REDRAW_PROMPT},
-                    ],
-                },
+        response = _gemini_call_with_retry(
+            client.models.generate_content,
+            model="gemini-2.0-flash",
+            contents=[
+                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                SVG_REDRAW_PROMPT,
             ],
         )
 
-        raw = response.choices[0].message.content or ""
-
-        # Strip any markdown fences if the model wrapped its output
-        raw = _strip_json_fences(raw) if raw.startswith("```") else raw.strip()
+        raw = (response.text or "").strip()
 
         # Extract from first <svg to last </svg>
         start = raw.find("<svg")
@@ -349,124 +318,64 @@ def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
     return []
 
 
-def _call_mistral_for_pages(
-    client: Mistral,
-    page_images: list[bytes],
-    page_offset: int,
-) -> tuple[list[dict[str, Any]], bool]:
-    """
-    Send a batch of page images to Pixtral and return (questions, hit_token_limit).
-    """
-    content: list[dict] = []
-    for i, img_bytes in enumerate(page_images):
-        b64 = base64.standard_b64encode(img_bytes).decode()
-        data_url = f"data:image/jpeg;base64,{b64}"
-        content.append({"type": "image_url", "image_url": {"url": data_url}})
-        content.append({"type": "text", "text": f"[Page {page_offset + i + 1}]"})
-
-    content.append({
-        "type": "text",
-        "text": "Extract all questions from these exam paper pages. Return JSON array only.",
-    })
-
-    response = _mistral_call_with_retry(
-        client.chat.complete,
-        model="pixtral-12b-2409",
-        max_tokens=8192,
-        messages=[
-            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
-            {"role": "user", "content": content},
-        ],
-    )
-
-    choice = response.choices[0]
-    raw = _strip_json_fences(choice.message.content or "")
-    hit_limit = choice.finish_reason == "length"
-    return _recover_partial_json_array(raw), hit_limit
-
-
 def _call_gemini_for_pages(
     page_images: list[bytes],
     page_offset: int,
 ) -> tuple[list[dict[str, Any]], bool]:
     """
-    Send a batch of page images to Google Gemini 2.0 Flash and return
-    (questions, hit_token_limit). Used as fallback when Mistral fails.
+    Send a batch of page images to Gemini 2.0 Flash and return (questions, hit_token_limit).
     """
-    import google.generativeai as genai
-
-    genai.configure(api_key=os.environ["GOOGLE_AI_API_KEY"])
-    model = genai.GenerativeModel(
-        "gemini-2.0-flash",
-        system_instruction=EXTRACTION_SYSTEM_PROMPT,
-    )
+    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
 
     parts: list[Any] = []
     for i, img_bytes in enumerate(page_images):
-        b64 = base64.standard_b64encode(img_bytes).decode()
-        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+        parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/jpeg"))
         parts.append(f"[Page {page_offset + i + 1}]")
     parts.append("Extract all questions from these exam paper pages. Return JSON array only.")
 
-    response = model.generate_content(parts)
+    response = _gemini_call_with_retry(
+        client.models.generate_content,
+        model="gemini-2.0-flash",
+        contents=parts,
+        config=types.GenerateContentConfig(
+            system_instruction=EXTRACTION_SYSTEM_PROMPT,
+            max_output_tokens=8192,
+        ),
+    )
+
     raw = _strip_json_fences(response.text or "")
-    return _recover_partial_json_array(raw), False
+    hit_limit = (
+        bool(response.candidates)
+        and "MAX_TOKENS" in str(response.candidates[0].finish_reason)
+    )
+    return _recover_partial_json_array(raw), hit_limit
 
 
 def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]]:
     """
-    Extract questions from all pages using adaptive batching.
+    Extract questions from all pages using Gemini 2.0 Flash with adaptive batching.
 
-    Primary: Mistral Pixtral. If a batch fails (any exception), Gemini 2.0 Flash
-    is used as a fallback for that batch before giving up.
-
-    Starts with _INITIAL_BATCH_SIZE pages per call. If a call hits the output
-    token limit the batch is automatically halved and retried — down to 1 page
-    at a time if needed. After a successful smaller batch the size grows back up.
+    Starts with _INITIAL_BATCH_SIZE pages per call. If a call hits the output token
+    limit the batch is automatically halved and retried — down to 1 page at a time
+    if needed. After a successful smaller batch the size grows back up.
     """
-    # 5-minute timeout — batches of page images can be large and slow to process
-    mistral_client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=300_000)
     results: list[dict[str, Any]] = []
-
     i = 0
     batch_size = _INITIAL_BATCH_SIZE
 
     while i < len(page_images):
         batch = page_images[i: i + batch_size]
 
-        questions: list[dict[str, Any]] = []
-        hit_limit = False
-        mistral_ok = False
         try:
-            questions, hit_limit = _call_mistral_for_pages(mistral_client, batch, page_offset=i)
-            mistral_ok = True
+            questions, hit_limit = _call_gemini_for_pages(batch, page_offset=i)
         except Exception as exc:
-            logger.warning(
-                "Mistral extraction failed for pages %d–%d (%s) — trying Gemini fallback",
+            logger.error(
+                "Gemini extraction failed for pages %d–%d: %s — skipping batch",
                 i + 1, i + len(batch), exc,
             )
-
-        # Also fall back to Gemini if Mistral returned no questions (bad/non-JSON response)
-        if not mistral_ok or (not questions and not hit_limit):
-            if mistral_ok:
-                logger.warning(
-                    "Mistral returned no questions for pages %d–%d — trying Gemini fallback",
-                    i + 1, i + len(batch),
-                )
-            try:
-                questions, hit_limit = _call_gemini_for_pages(batch, page_offset=i)
-                logger.info(
-                    "Gemini fallback succeeded for pages %d–%d: %d questions",
-                    i + 1, i + len(batch), len(questions),
-                )
-            except Exception as gemini_exc:
-                logger.error(
-                    "Gemini fallback also failed for pages %d–%d: %s — skipping batch",
-                    i + 1, i + len(batch), gemini_exc,
-                )
+            questions, hit_limit = [], False
 
         if hit_limit and batch_size > 1:
-            # Too dense — halve and retry the same position
             batch_size = max(1, batch_size // 2)
             logger.warning(
                 "Token limit hit at page %d; retrying with batch_size=%d",
@@ -481,13 +390,11 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
         results.extend(questions)
         i += len(batch)
 
-        # Gradually grow batch size back toward the initial value after success
         if not hit_limit and batch_size < _INITIAL_BATCH_SIZE:
             batch_size = min(_INITIAL_BATCH_SIZE, batch_size * 2)
 
-        # Pause between batches — keeps us well under rate limits
         if i < len(page_images):
-            time.sleep(3)
+            time.sleep(2)
 
     return results
 
@@ -497,12 +404,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
     Full extraction pipeline. Designed to run as a FastAPI BackgroundTask.
 
     Steps:
-    1. Render each PDF page to PNG
+    1. Render each PDF page to JPEG
     2. Upload page images to Supabase Storage
-    3. Send page images to Claude vision — extracts questions with LaTeX math + diagram bbox
+    3. Send page images to Gemini vision — extracts questions with LaTeX math + diagram bbox
     4. For each question with a diagram:
        a. Crop just the diagram region from the page (tight crop using bbox)
-       b. Ask Claude to redraw it as clean SVG
+       b. Ask Gemini to redraw it as clean SVG
        c. Store SVG (or cropped PNG fallback) as the question's image_url
     5. Insert questions into the question table
     6. Update paper status → 'ready' (or 'error' on failure)
@@ -520,7 +427,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             url = _upload_page_image(img_bytes, paper_id, idx)
             page_urls.append(url)
 
-        # 3. Extract questions via Pixtral vision
+        # 3. Extract questions via Gemini vision
         questions = _parse_questions_from_pages(page_images)
         logger.info("Extracted %d questions for paper %s", len(questions), paper_id)
 
@@ -554,7 +461,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                     )
                     diagram_status = "ok" if diagram_ok else "failed"
                 else:
-                    # No valid bbox from Claude — quarantine for admin review
+                    # No valid bbox — quarantine for admin review
                     image_url = page_urls[page_idx]
                     diagram_status = "failed"
                     logger.warning(

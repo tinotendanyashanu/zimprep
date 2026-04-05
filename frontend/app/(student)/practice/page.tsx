@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client";
 import {
   getSubjects, getPracticeSession, getNextQuestion, getSubjectTopics,
   getWeakTopics, submitAttempt, flagAttempt, getPapersForSubject,
-  type Subject, type Question, type PracticeAttemptResult, type WeakTopic,
+  type Subject, type Question, type PracticeAttemptResult, type WeakTopic, type MCQOption,
 } from "@/lib/api";
 import { UpgradePrompt } from "@/components/UpgradePrompt";
 import { useQuota } from "@/hooks/useQuota";
@@ -29,6 +29,24 @@ const LEVEL_COLORS: Record<string, string> = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function getMcqOptions(q: Question): MCQOption[] {
+  if (q.mcq_options && q.mcq_options.length > 0) return q.mcq_options;
+  // Fallback: parse "A  text", "B. text", "A) text" patterns from question text
+  const lines = q.text.split(/\n/);
+  const opts: MCQOption[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*([A-D])[.\s\)]+(.+)/);
+    if (m) opts.push({ letter: m[1] as "A" | "B" | "C" | "D", text: m[2].trim() });
+  }
+  return opts.length >= 2 ? opts : MCQ_OPTIONS.map((l) => ({ letter: l, text: `Option ${l}` }));
+}
+
+function getQuestionStem(q: Question): string {
+  if (q.question_type !== "mcq") return q.text;
+  if (q.mcq_options && q.mcq_options.length > 0) return q.text;
+  return q.text.split(/\n/).filter((l) => !/^\s*[A-D][.\s\)]/.test(l)).join("\n").trim();
+}
 
 function groupByLevel(subjects: Subject[]) {
   return subjects.reduce<Record<string, Subject[]>>((acc, s) => {
@@ -542,7 +560,7 @@ export default function PracticePage() {
                       </div>
                     )}
                     <div className="text-foreground text-base leading-relaxed font-medium">
-                      <MathText text={question.text} />
+                      <MathText text={getQuestionStem(question)} />
                     </div>
                   </div>
                   <span className="shrink-0 text-xs font-semibold text-muted-foreground bg-muted px-2.5 py-1 rounded-full whitespace-nowrap">
@@ -572,13 +590,13 @@ export default function PracticePage() {
                 <div className="px-5 pb-5 space-y-4 border-t border-border pt-4">
                   {question.question_type === "mcq" ? (
                     <div className="grid grid-cols-1 gap-2.5">
-                      {MCQ_OPTIONS.map((opt, idx) => {
-                        const colors = OPTION_COLORS[opt];
-                        const sel = answer === opt;
+                      {getMcqOptions(question).map((opt, idx) => {
+                        const colors = OPTION_COLORS[opt.letter as keyof typeof OPTION_COLORS] ?? OPTION_COLORS.A;
+                        const sel = answer === opt.letter;
                         return (
                           <button
-                            key={opt}
-                            onClick={() => setAnswer(sel ? "" : opt)}
+                            key={opt.letter}
+                            onClick={() => setAnswer(sel ? "" : opt.letter)}
                             className={cn(
                               "flex items-center gap-4 border-2 rounded-xl p-3.5 text-left transition-all duration-150",
                               sel ? colors.selected : cn("bg-white", colors.base)
@@ -588,10 +606,10 @@ export default function PracticePage() {
                               "shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white",
                               sel ? colors.badge : "bg-muted text-muted-foreground"
                             )}>
-                              {opt}
+                              {opt.letter}
                             </span>
                             <span className="text-sm font-medium text-foreground flex-1">
-                              Option {opt}
+                              <MathText text={opt.text} />
                               <span className="block text-xs text-muted-foreground font-normal">Press {idx + 1}</span>
                             </span>
                             {sel && <span className="text-primary font-bold ml-auto">✓</span>}

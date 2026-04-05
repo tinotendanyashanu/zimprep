@@ -1,10 +1,9 @@
 """
 AI Marking Service
 
-Marks student attempts with cost optimisations:
+Marks student attempts using Google Gemini 2.0 Flash with cost optimisations:
 - MCQ: answer key lookup (zero AI cost)
-- Mistral small for ≤3 mark questions (fast + cheap)
-- Google Gemini 2.0 Flash for >3 mark questions (higher quality)
+- Written: Gemini 2.0 Flash for all mark values
 - Exact answer caching (same question+answer = reuse result)
 - Empty/trivial answers score 0 without calling AI
 """
@@ -17,9 +16,6 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from mistralai.client import Mistral
-from mistralai.client.errors.sdkerror import SDKError
-
 from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -28,23 +24,25 @@ _MAX_RETRIES = 3
 _RETRY_BASE_DELAY = 2  # seconds; doubles each attempt
 
 
-def _mistral_call_with_retry(fn, *args, **kwargs):
+def _gemini_call_with_retry(fn, *args, **kwargs):
     delay = _RETRY_BASE_DELAY
     for attempt in range(_MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
-        except SDKError as exc:
-            if "429" in str(exc) or "rate_limited" in str(exc).lower():
-                if attempt < _MAX_RETRIES - 1:
-                    logger.warning(
-                        "Mistral rate-limit (attempt %d/%d) — waiting %ds",
-                        attempt + 1, _MAX_RETRIES, delay,
-                    )
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
+        except Exception as exc:
+            msg = str(exc).lower()
+            is_retryable = "429" in msg or "quota" in msg or "rate" in msg or "resource exhausted" in msg
+            if is_retryable and attempt < _MAX_RETRIES - 1:
+                logger.warning(
+                    "Gemini rate-limit (attempt %d/%d) — waiting %ds",
+                    attempt + 1, _MAX_RETRIES, delay,
+                )
+                time.sleep(delay)
+                delay *= 2
+                continue
             raise
-    raise RuntimeError("Mistral marking call failed after all retries")
+    raise RuntimeError("Gemini marking call failed after all retries")
+
 
 MARKING_SYSTEM_PROMPT = """You are an experienced ZIMSEC examiner. Given a question and a student's answer, evaluate the answer and return ONLY valid JSON matching this schema exactly:
 {
@@ -80,7 +78,6 @@ def _mcq_static_note(
     Shows the correct option letter and its text (if mcq_options are stored),
     plus a brief note when the student was wrong.
     """
-    # Try to find the option text for the correct answer
     correct_text = ""
     if question.get("mcq_options"):
         for opt in question["mcq_options"]:
@@ -164,7 +161,6 @@ def mark_attempt(attempt_id: str) -> None:
             _update_attempt(attempt_id, result, marks)
             return
         elif given in ("A", "B", "C", "D"):
-            # Answer key not stored yet — record answer but don't penalise
             logger.warning(
                 "MCQ answer row missing for question %s — recording answer without scoring",
                 question["id"],
@@ -181,8 +177,21 @@ def mark_attempt(attempt_id: str) -> None:
             _update_attempt(attempt_id, result, marks)
             return
         else:
-            # Not a valid MCQ selection — fall through to written marking
-            question_type = "written"
+            result = {
+                "score": 0,
+                "feedback": {
+                    "correct_points": [],
+                    "missing_points": [],
+                    "examiner_note": (
+                        f"Invalid MCQ answer '{given}'. Please select A, B, C, or D."
+                        if given
+                        else "No answer selected."
+                    ),
+                },
+                "references": [],
+            }
+            _update_attempt(attempt_id, result, marks)
+            return
 
     # ── Empty / trivial answer gate ────────────────────────────────────────────
     if not student_answer or not student_answer.strip():
@@ -232,65 +241,39 @@ def mark_attempt(attempt_id: str) -> None:
         _update_attempt(attempt_id, result, marks)
         return
 
+    # ── Gemini marking ─────────────────────────────────────────────────────────
+    from google import genai
+    from google.genai import types
+
     prompt = (
         f"Subject: {subject['name']} ({subject['level']})\n"
         f"Question ({marks} mark{'s' if marks != 1 else ''}): {question['text']}\n"
         f"Student Answer: {student_answer}"
     )
 
-    def _strip_fences(raw: str) -> str:
-        raw = raw.strip()
+    try:
+        client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
+        response = _gemini_call_with_retry(
+            client.models.generate_content,
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=MARKING_SYSTEM_PROMPT,
+                max_output_tokens=1024,
+            ),
+        )
+        raw = (response.text or "").strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        return raw
+        result = json.loads(raw)
+    except Exception as exc:
+        logger.error("Gemini marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
+        result = dict(_FALLBACK_RESULT)
 
-    result: dict[str, Any] | None = None
-
-    # ── Simple questions (≤3 marks): Mistral small ─────────────────────────────
-    if marks <= 3:
-        try:
-            client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=60_000)
-            response = _mistral_call_with_retry(
-                client.chat.complete,
-                model="mistral-small-latest",
-                max_tokens=1024,
-                messages=[
-                    {"role": "system", "content": MARKING_SYSTEM_PROMPT},
-                    {"role": "user", "content": prompt},
-                ],
-            )
-            raw = _strip_fences(response.choices[0].message.content or "")
-            result = json.loads(raw)
-        except Exception as exc:
-            logger.error(
-                "Mistral marking failed for attempt %s: %s", attempt_id, exc, exc_info=True
-            )
-
-    # ── Complex questions (>3 marks): Google Gemini 2.0 Flash ──────────────────
-    if result is None:
-        try:
-            import google.generativeai as genai
-
-            genai.configure(api_key=os.environ["GOOGLE_AI_API_KEY"])
-            model = genai.GenerativeModel(
-                "gemini-2.0-flash",
-                system_instruction=MARKING_SYSTEM_PROMPT,
-            )
-            response = model.generate_content(prompt)
-            raw = _strip_fences(response.text or "")
-            result = json.loads(raw)
-            if marks <= 3:
-                logger.info("Gemini fallback used for attempt %s (Mistral failed)", attempt_id)
-        except Exception as exc:
-            logger.error(
-                "Gemini marking failed for attempt %s: %s", attempt_id, exc, exc_info=True
-            )
-            result = dict(_FALLBACK_RESULT)
-
-    _update_attempt(attempt_id, result or _FALLBACK_RESULT, marks)
+    _update_attempt(attempt_id, result, marks)
 
 
 def mark_session(session_id: str) -> None:
