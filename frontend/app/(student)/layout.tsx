@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { motion, AnimatePresence } from "framer-motion";
+import { StudentContext, type StudentProfile } from "@/lib/student-context";
 
 // ── SVG icons ────────────────────────────────────────────────────────────────
 
@@ -199,18 +200,30 @@ function StudentShell({ children, studentName }: { children: React.ReactNode; st
 
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const [studentName, setStudentName] = useState<string | null>(null);
+  const [profile, setProfile] = useState<StudentProfile | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push("/login"); return; }
       const { data: student } = await supabase
-        .from("student").select("name").eq("id", user.id).single();
-      setStudentName(student?.name ?? user.email ?? "Student");
+        .from("student")
+        .select("name, exam_board, level")
+        .eq("id", user.id)
+        .single();
+      setProfile({
+        id: user.id,
+        name: student?.name ?? user.email ?? "Student",
+        examBoard: student?.exam_board ?? "zimsec",
+        level: student?.level ?? "",
+      });
     });
   }, [router]);
 
-  if (studentName === null) return null;
-  return <StudentShell studentName={studentName}>{children}</StudentShell>;
+  if (profile === null) return null;
+  return (
+    <StudentContext.Provider value={profile}>
+      <StudentShell studentName={profile.name}>{children}</StudentShell>
+    </StudentContext.Provider>
+  );
 }

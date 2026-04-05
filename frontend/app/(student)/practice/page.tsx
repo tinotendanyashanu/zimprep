@@ -11,6 +11,7 @@ import { UpgradePrompt } from "@/components/UpgradePrompt";
 import { useQuota } from "@/hooks/useQuota";
 import { MathText } from "@/components/math-text";
 import { cn } from "@/lib/utils";
+import { useStudent } from "@/lib/student-context";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -147,7 +148,7 @@ function FeedbackCard({ result, question, onNext, onFlag, flagged }: {
 
 export default function PracticePage() {
   const { guardedSubmit, showUpgrade, upgradeDetail, dismissUpgrade } = useQuota();
-  const [studentId, setStudentId] = useState<string | null>(null);
+  const { id: studentId, examBoard, level } = useStudent();
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [subjectsLoading, setSubjectsLoading] = useState(true);
 
@@ -178,17 +179,11 @@ export default function PracticePage() {
   const imageRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    createClient().auth.getUser().then(({ data: { user } }) => {
-      if (user) setStudentId(user.id);
-    });
-  }, []);
-
-  useEffect(() => {
-    getSubjects()
+    getSubjects(examBoard || undefined, level || undefined)
       .then(setSubjects)
       .catch(() => setError("Failed to load subjects"))
       .finally(() => setSubjectsLoading(false));
-  }, []);
+  }, [examBoard, level]);
 
   const refreshWeakTopics = useCallback(() => {
     if (!selectedSubject || !studentId) return;

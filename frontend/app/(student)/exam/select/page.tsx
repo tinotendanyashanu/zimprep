@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 import {
   getSubjects,
   getPapersForSubject,
@@ -10,6 +9,7 @@ import {
   type Subject,
   type Paper,
 } from "@/lib/api";
+import { useStudent } from "@/lib/student-context";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -31,7 +31,7 @@ const LEVEL_LABELS: Record<string, string> = {
 
 export default function ExamSelectPage() {
   const router = useRouter();
-  const [studentId, setStudentId] = useState<string | null>(null);
+  const { id: studentId, examBoard, level } = useStudent();
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [papers, setPapers] = useState<Paper[]>([]);
@@ -43,24 +43,14 @@ export default function ExamSelectPage() {
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Get student ID + profile, then load subjects filtered to their board+level
+  // Load subjects filtered to the student's board + level (from context)
   useEffect(() => {
-    const supabase = createClient();
     setLoading(true);
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) return;
-      setStudentId(user.id);
-      const { data: student } = await supabase
-        .from("student")
-        .select("exam_board, level")
-        .eq("id", user.id)
-        .single();
-      getSubjects(student?.exam_board, student?.level)
-        .then(setSubjects)
-        .catch((e) => setError(e.message))
-        .finally(() => setLoading(false));
-    });
-  }, []);
+    getSubjects(examBoard || undefined, level || undefined)
+      .then(setSubjects)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, [examBoard, level]);
 
   async function handleSelectSubject(subject: Subject) {
     setSelectedSubject(subject);
@@ -116,7 +106,7 @@ export default function ExamSelectPage() {
           onRetry={() => {
             setError(null);
             setLoading(true);
-            getSubjects()
+            getSubjects(examBoard || undefined, level || undefined)
               .then(setSubjects)
               .catch((e) => setError(e.message))
               .finally(() => setLoading(false));
