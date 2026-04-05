@@ -141,7 +141,7 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
     Returns the SVG string if successful, otherwise None.
     """
     try:
-        client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+        client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=120_000)
         b64 = base64.standard_b64encode(image_bytes).decode()
         data_url = f"data:image/png;base64,{b64}"
 
@@ -244,7 +244,7 @@ def _process_diagram(
     return page_url, False
 
 
-_INITIAL_BATCH_SIZE = 8  # Starting pages-per-batch; auto-halves on token overflow
+_INITIAL_BATCH_SIZE = 4  # Starting pages-per-batch; auto-halves on token overflow
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -336,7 +336,8 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
 
     Admin just uploads a PDF; this function handles everything.
     """
-    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+    # 5-minute timeout — batches of page images can be large and slow to process
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=300_000)
     results: list[dict[str, Any]] = []
 
     i = 0

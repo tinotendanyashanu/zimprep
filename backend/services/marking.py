@@ -211,7 +211,7 @@ def mark_attempt(attempt_id: str) -> None:
     # ── Mistral marking ────────────────────────────────────────────────────────
     # mistral-small for ≤3 mark questions (fast + cheap), mistral-large for longer answers
     model = "mistral-small-latest" if marks <= 3 else "mistral-large-latest"
-    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"])
+    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=60_000)
 
     prompt = (
         f"Subject: {subject['name']} ({subject['level']})\n"
