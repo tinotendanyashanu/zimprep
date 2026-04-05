@@ -16,7 +16,7 @@ import os
 from datetime import datetime, timezone
 from typing import Any
 
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 from db.client import get_supabase
 

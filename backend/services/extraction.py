@@ -25,7 +25,7 @@ import os
 from typing import Any
 
 import fitz  # PyMuPDF
-from mistralai import Mistral
+from mistralai.client import Mistral
 
 from db.client import get_supabase
 
