@@ -342,7 +342,10 @@ def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             pass
 
-    logger.warning("Could not recover any questions from truncated JSON")
+    logger.warning(
+        "Could not recover any questions from truncated JSON. Raw (first 500 chars): %s",
+        raw[:500],
+    )
     return []
 
 
@@ -433,13 +436,23 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
 
         questions: list[dict[str, Any]] = []
         hit_limit = False
+        mistral_ok = False
         try:
             questions, hit_limit = _call_mistral_for_pages(mistral_client, batch, page_offset=i)
+            mistral_ok = True
         except Exception as exc:
             logger.warning(
                 "Mistral extraction failed for pages %d–%d (%s) — trying Gemini fallback",
                 i + 1, i + len(batch), exc,
             )
+
+        # Also fall back to Gemini if Mistral returned no questions (bad/non-JSON response)
+        if not mistral_ok or (not questions and not hit_limit):
+            if mistral_ok:
+                logger.warning(
+                    "Mistral returned no questions for pages %d–%d — trying Gemini fallback",
+                    i + 1, i + len(batch),
+                )
             try:
                 questions, hit_limit = _call_gemini_for_pages(batch, page_offset=i)
                 logger.info(
