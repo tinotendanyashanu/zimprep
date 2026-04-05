@@ -285,29 +285,50 @@ def _strip_json_fences(raw: str) -> str:
     return raw
 
 
+def _fix_json_escapes(raw: str) -> str:
+    """
+    Gemini outputs LaTeX notation (\\(, \\frac, \\sqrt, etc.) inside JSON strings.
+    These are invalid JSON escape sequences. Fix by doubling any backslash that
+    isn't part of a legitimate JSON escape: \\n \\r \\t \\" \\\\.
+    """
+    import re
+
+    def _replacer(m: re.Match) -> str:
+        next_char = m.group(1)
+        # Keep valid JSON escape sequences unchanged
+        if next_char in ('"', '\\', 'n', 'r', 't', '/'):
+            return m.group(0)
+        # Double the backslash — turns \( into \\(, \frac into \\frac, etc.
+        return '\\\\' + next_char
+
+    return re.sub(r'\\(.)', _replacer, raw)
+
+
 def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
     """
-    Parse a JSON array that may be token-truncated.
+    Parse a JSON array that may be token-truncated or contain LaTeX backslashes.
     Falls back to extracting everything up to the last complete object.
     """
+    fixed = _fix_json_escapes(raw)
+
     try:
-        return json.loads(raw)
+        return json.loads(fixed)
     except json.JSONDecodeError:
         pass
 
     for tail in ("}\n]", "},\n]", "},]", "}]", "} ]"):
-        idx = raw.rfind(tail[:-1])  # find the closing brace, ignoring the ]
+        idx = fixed.rfind(tail[:-1])
         if idx != -1:
             try:
-                return json.loads(raw[: idx + 1] + "]")
+                return json.loads(fixed[: idx + 1] + "]")
             except json.JSONDecodeError:
                 continue
 
-    last_brace = raw.rfind("}")
-    first_bracket = raw.find("[")
+    last_brace = fixed.rfind("}")
+    first_bracket = fixed.find("[")
     if last_brace > 0 and first_bracket != -1:
         try:
-            return json.loads(raw[first_bracket: last_brace + 1] + "]")
+            return json.loads(fixed[first_bracket: last_brace + 1] + "]")
         except json.JSONDecodeError:
             pass
 
@@ -339,7 +360,7 @@ def _call_gemini_for_pages(
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=8192,
+            max_output_tokens=65536,
         ),
     )
 
