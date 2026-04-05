@@ -13,14 +13,38 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 from mistralai.client import Mistral
+from mistralai.client.errors.sdkerror import SDKError
 
 from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 4
+_RETRY_BASE_DELAY = 10  # seconds; doubles each attempt
+
+
+def _mistral_call_with_retry(fn, *args, **kwargs):
+    delay = _RETRY_BASE_DELAY
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn(*args, **kwargs)
+        except SDKError as exc:
+            if "429" in str(exc) or "rate_limited" in str(exc).lower():
+                if attempt < _MAX_RETRIES - 1:
+                    logger.warning(
+                        "Mistral rate-limit (attempt %d/%d) — waiting %ds",
+                        attempt + 1, _MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+            raise
+    raise RuntimeError("Mistral marking call failed after all retries")
 
 MARKING_SYSTEM_PROMPT = """You are an experienced ZIMSEC examiner. Given a question and a student's answer, evaluate the answer and return ONLY valid JSON matching this schema exactly:
 {
@@ -220,7 +244,8 @@ def mark_attempt(attempt_id: str) -> None:
     )
 
     try:
-        response = client.chat.complete(
+        response = _mistral_call_with_retry(
+            client.chat.complete,
             model=model,
             max_tokens=1024,
             messages=[

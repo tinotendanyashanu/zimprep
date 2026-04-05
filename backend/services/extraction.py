@@ -22,14 +22,42 @@ import base64
 import json
 import logging
 import os
+import time
 from typing import Any
 
 import fitz  # PyMuPDF
 from mistralai.client import Mistral
+from mistralai.client.errors.sdkerror import SDKError
 
 from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
+
+_MAX_RETRIES = 6
+_RETRY_BASE_DELAY = 10  # seconds; doubles each attempt (10, 20, 40, 80, 160, 320)
+
+
+def _mistral_call_with_retry(fn, *args, **kwargs):
+    """
+    Call a Mistral SDK function, retrying on 429 rate-limit responses with
+    exponential back-off. Raises the last exception if all retries are exhausted.
+    """
+    delay = _RETRY_BASE_DELAY
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return fn(*args, **kwargs)
+        except SDKError as exc:
+            if "429" in str(exc) or "rate_limited" in str(exc).lower():
+                if attempt < _MAX_RETRIES - 1:
+                    logger.warning(
+                        "Mistral rate-limit hit (attempt %d/%d) — waiting %ds before retry",
+                        attempt + 1, _MAX_RETRIES, delay,
+                    )
+                    time.sleep(delay)
+                    delay *= 2
+                    continue
+            raise
+    raise RuntimeError("Mistral call failed after all retries")
 
 EXTRACTION_SYSTEM_PROMPT = r"""You are an expert at reading ZIMSEC and Cambridge past exam papers from images.
 Extract every question from the provided exam paper page images and return a single JSON array.
@@ -145,7 +173,8 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
         b64 = base64.standard_b64encode(image_bytes).decode()
         data_url = f"data:image/png;base64,{b64}"
 
-        response = client.chat.complete(
+        response = _mistral_call_with_retry(
+            client.chat.complete,
             model="pixtral-12b-2409",
             max_tokens=6000,
             messages=[
@@ -310,7 +339,8 @@ def _call_mistral_for_pages(
         "text": "Extract all questions from these exam paper pages. Return JSON array only.",
     })
 
-    response = client.chat.complete(
+    response = _mistral_call_with_retry(
+        client.chat.complete,
         model="pixtral-large-latest",
         max_tokens=8192,
         messages=[
