@@ -180,7 +180,7 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
 
         response = _gemini_call_with_retry(
             client.models.generate_content,
-            model="gemini-2.0-flash-001",
+            model="gemini-2.5-flash",
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                 SVG_REDRAW_PROMPT,
@@ -335,7 +335,7 @@ def _call_gemini_for_pages(
 
     response = _gemini_call_with_retry(
         client.models.generate_content,
-        model="gemini-2.0-flash-001",
+        model="gemini-2.5-flash",
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
@@ -516,7 +516,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                     len(mcq_answer_rows), paper_id,
                 )
 
-        # 6. Mark paper ready
+        # 6. Mark paper ready (or error if nothing was extracted)
+        if not rows:
+            logger.error("Extraction produced 0 questions for paper %s — marking as error", paper_id)
+            supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
+            return
+
         supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
         logger.info(
             "Extraction complete for paper %s — %d questions inserted",

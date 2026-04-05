@@ -255,7 +255,7 @@ def mark_attempt(attempt_id: str) -> None:
         client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
         response = _gemini_call_with_retry(
             client.models.generate_content,
-            model="gemini-2.0-flash-001",
+            model="gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=MARKING_SYSTEM_PROMPT,
