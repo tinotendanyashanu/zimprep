@@ -62,6 +62,7 @@ CREATE TRIGGER subscription_updated_at
 ALTER TABLE subscription ENABLE ROW LEVEL SECURITY;
 
 -- Students can read their own subscription
+DROP POLICY IF EXISTS "Students can read own subscription" ON subscription;
 CREATE POLICY "Students can read own subscription"
   ON subscription FOR SELECT
   USING (auth.uid() = student_id);

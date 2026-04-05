@@ -241,34 +241,68 @@ def _process_diagram(
     return page_url
 
 
-def _parse_questions_from_pages(
+_INITIAL_BATCH_SIZE = 8  # Starting pages-per-batch; auto-halves on token overflow
+
+
+def _strip_json_fences(raw: str) -> str:
+    """Strip markdown code fences and surrounding whitespace."""
+    raw = raw.strip()
+    if raw.startswith("```"):
+        for part in raw.split("```")[1:]:
+            candidate = part.strip()
+            if candidate.startswith("json"):
+                candidate = candidate[4:].strip()
+            if candidate:
+                return candidate
+    return raw
+
+
+def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
+    """
+    Parse a JSON array that may be token-truncated.
+    Falls back to extracting everything up to the last complete object.
+    """
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        pass
+
+    for tail in ("}\n]", "},\n]", "},]", "}]", "} ]"):
+        idx = raw.rfind(tail[:-1])  # find the closing brace, ignoring the ]
+        if idx != -1:
+            try:
+                return json.loads(raw[: idx + 1] + "]")
+            except json.JSONDecodeError:
+                continue
+
+    last_brace = raw.rfind("}")
+    first_bracket = raw.find("[")
+    if last_brace > 0 and first_bracket != -1:
+        try:
+            return json.loads(raw[first_bracket: last_brace + 1] + "]")
+        except json.JSONDecodeError:
+            pass
+
+    logger.warning("Could not recover any questions from truncated JSON")
+    return []
+
+
+def _call_claude_for_pages(
+    client: anthropic.Anthropic,
     page_images: list[bytes],
-    batch_start: int = 0,
-) -> list[dict[str, Any]]:
+    page_offset: int,
+) -> tuple[list[dict[str, Any]], bool]:
     """
-    Send up to 20 rendered page images to Claude vision and parse the JSON response.
-    Recurses for papers with more than 20 pages.
+    Send a batch of page images to Claude and return (questions, hit_token_limit).
     """
-    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-
-    batch = page_images[:20]
     content: list[dict] = []
-
-    for i, img_bytes in enumerate(batch):
-        page_num = batch_start + i + 1
+    for i, img_bytes in enumerate(page_images):
         b64 = base64.standard_b64encode(img_bytes).decode()
         content.append({
             "type": "image",
-            "source": {
-                "type": "base64",
-                "media_type": "image/png",
-                "data": b64,
-            },
+            "source": {"type": "base64", "media_type": "image/png", "data": b64},
         })
-        content.append({
-            "type": "text",
-            "text": f"[Page {page_num}]",
-        })
+        content.append({"type": "text", "text": f"[Page {page_offset + i + 1}]"})
 
     content.append({
         "type": "text",
@@ -282,23 +316,53 @@ def _parse_questions_from_pages(
         messages=[{"role": "user", "content": content}],
     )
 
-    raw = message.content[0].text.strip()
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
+    raw = _strip_json_fences(message.content[0].text)
+    hit_limit = message.stop_reason == "max_tokens"
+    return _recover_partial_json_array(raw), hit_limit
 
-    questions = json.loads(raw)
 
-    if len(page_images) > 20:
-        rest = _parse_questions_from_pages(
-            page_images[20:],
-            batch_start=batch_start + 20,
+def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]]:
+    """
+    Extract questions from all pages using adaptive batching.
+
+    Starts with _INITIAL_BATCH_SIZE pages per Claude call. If a call hits the
+    output token limit the batch is automatically halved and retried — down to
+    1 page at a time if needed — so extraction always completes regardless of
+    paper density. After a successful smaller batch the size grows back up.
+
+    Admin just uploads a PDF; this function handles everything.
+    """
+    client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+    results: list[dict[str, Any]] = []
+
+    i = 0
+    batch_size = _INITIAL_BATCH_SIZE
+
+    while i < len(page_images):
+        batch = page_images[i: i + batch_size]
+        questions, hit_limit = _call_claude_for_pages(client, batch, page_offset=i)
+
+        if hit_limit and batch_size > 1:
+            # Too dense — halve and retry the same position
+            batch_size = max(1, batch_size // 2)
+            logger.warning(
+                "Token limit hit at page %d; retrying with batch_size=%d",
+                i + 1, batch_size,
+            )
+            continue
+
+        logger.info(
+            "Pages %d–%d: extracted %d questions (batch_size=%d)",
+            i + 1, i + len(batch), len(questions), batch_size,
         )
-        questions.extend(rest)
+        results.extend(questions)
+        i += len(batch)
 
-    return questions
+        # Gradually grow batch size back toward the initial value after success
+        if not hit_limit and batch_size < _INITIAL_BATCH_SIZE:
+            batch_size = min(_INITIAL_BATCH_SIZE, batch_size * 2)
+
+    return results
 
 
 def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:

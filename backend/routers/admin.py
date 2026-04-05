@@ -173,7 +173,7 @@ def list_papers() -> list[dict[str, Any]]:
     supabase = get_supabase()
     result = (
         supabase.table("paper")
-        .select("id, year, paper_number, pdf_url, status, created_at, subject(name)")
+        .select("id, year, paper_number, duration_minutes, pdf_url, status, created_at, subject(name)")
         .order("created_at", desc=True)
         .execute()
     )
@@ -186,6 +186,7 @@ def list_papers() -> list[dict[str, Any]]:
                 "subject_name": subject_name,
                 "year": row["year"],
                 "paper_number": row["paper_number"],
+                "duration_minutes": row.get("duration_minutes", 120),
                 "pdf_url": row["pdf_url"],
                 "status": row["status"],
                 "created_at": row["created_at"],

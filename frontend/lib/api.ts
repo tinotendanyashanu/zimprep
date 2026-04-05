@@ -149,6 +149,82 @@ export type ParentChild = {
   created_at: string;
 };
 
+export type ChildStatus = "Improving" | "Stable" | "At Risk";
+
+export type ChildSummary = {
+  student_id: string;
+  name: string;
+  level: string;
+  avg_score: number;
+  study_hours_this_week: number;
+  questions_this_week: number;
+  streak: number;
+  status: ChildStatus;
+  strong_subjects: string[];
+  weak_subjects: string[];
+  subjects: string[];
+  days_inactive: number | null;
+  avg_last7: number | null;
+  avg_prev7: number | null;
+  readiness_index: number;
+  coverage: number;
+  consistency: number;
+};
+
+export type FamilySummary = {
+  total_study_hours: number;
+  total_questions_attempted: number;
+  avg_family_score: number;
+  children_needing_attention: number;
+  top_performing_child: string | null;
+};
+
+export type FamilyDashboard = {
+  total_children: number;
+  family_summary: FamilySummary;
+  children: ChildSummary[];
+};
+
+export type ChildReportSection = {
+  name: string;
+  status: ChildStatus;
+  avg_score: number;
+  study_hours: number;
+  questions_attempted: number;
+  streak: number;
+  strong_areas: string[];
+  weak_areas: string[];
+  performance_trend: string;
+  readiness_index: number;
+  recommendations_for_child: string[];
+  recommendations_for_parent: string[];
+};
+
+export type WeeklyFamilyReport = {
+  report_id?: string;
+  week_ending: string;
+  generated_at?: string;
+  total_children: number;
+  family_summary: FamilySummary;
+  parent_insights: string[];
+  children: ChildReportSection[];
+};
+
+export type ParentAlert = {
+  id: string;
+  student_id: string;
+  alert_type: "inactivity" | "performance_drop" | "improving" | "goal_not_met";
+  message: string;
+  is_read: boolean;
+  created_at: string;
+};
+
+export type ParentGoals = {
+  weekly_hours_target: number;
+  target_grade_percent: number;
+  updated_at: string | null;
+};
+
 // ── Core fetch helper ──────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -338,3 +414,67 @@ export const getChildProgress = (
     { headers: token ? { Authorization: `Bearer ${token}` } : {} },
   );
 };
+
+export const getParentFamilyDashboard = (parentId: string, token?: string) =>
+  apiFetch<FamilyDashboard>(`/parents/${parentId}/family-dashboard`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const getParentReport = (parentId: string, token?: string) =>
+  apiFetch<WeeklyFamilyReport>(`/parents/${parentId}/report`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const generateParentReport = (parentId: string, token?: string) =>
+  apiFetch<WeeklyFamilyReport>(`/parents/${parentId}/report/generate`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const getParentAlerts = (parentId: string, token?: string, unreadOnly = false) => {
+  const qs = unreadOnly ? "?unread_only=true" : "";
+  return apiFetch<ParentAlert[]>(`/parents/${parentId}/alerts${qs}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+};
+
+export const markAlertRead = (parentId: string, alertId: string, token?: string) =>
+  apiFetch<{ success: boolean }>(`/parents/${parentId}/alerts/${alertId}/read`, {
+    method: "PATCH",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const markAllAlertsRead = (parentId: string, token?: string) =>
+  apiFetch<{ success: boolean }>(`/parents/${parentId}/alerts/read-all`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const getChildGoals = (parentId: string, studentId: string, token?: string) =>
+  apiFetch<ParentGoals>(`/parents/${parentId}/children/${studentId}/goals`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+
+export const setChildGoals = (
+  parentId: string,
+  studentId: string,
+  goals: { weekly_hours_target: number; target_grade_percent: number },
+  token?: string,
+) =>
+  apiFetch<{ success: boolean }>(`/parents/${parentId}/children/${studentId}/goals`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(goals),
+  });
+
+export const checkParentAlerts = (parentId: string, token?: string) =>
+  apiFetch<{ created: number; alerts: ParentAlert[] }>(
+    `/parents/${parentId}/alerts/check`,
+    {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+    },
+  );

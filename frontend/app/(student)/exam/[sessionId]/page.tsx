@@ -91,8 +91,8 @@ function ScoreBadge({ score, max }: { score: number; max: number }) {
   );
 }
 
-function PracticeFeedback({ result, question, onNext }: {
-  result: Attempt; question: Question; onNext: () => void;
+function PracticeFeedback({ result, question, onNext, onRetry }: {
+  result: Attempt; question: Question; onNext: () => void; onRetry: () => void;
 }) {
   const score = result.ai_score ?? 0;
   const pct = question.marks > 0 ? score / question.marks : 0;
@@ -153,13 +153,14 @@ function PracticeFeedback({ result, question, onNext }: {
         </div>
       )}
 
-      <Button
-        onClick={onNext}
-        size="lg"
-        className="w-full mt-4"
-      >
-        Next Question →
-      </Button>
+      <div className="flex gap-3 mt-4">
+        <Button onClick={onNext} size="lg" className="flex-1">
+          Next Question →
+        </Button>
+        <Button onClick={onRetry} size="lg" variant="outline">
+          Try Again
+        </Button>
+      </div>
     </motion.div>
   );
 }
@@ -242,7 +243,7 @@ export default function ExamSessionPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [answerTab, setAnswerTab] = useState<"text" | "photo">("text");
 
-  const [practiceResult, setPracticeResult] = useState<Attempt | null>(null);
+  const [practiceResults, setPracticeResults] = useState<Record<string, Attempt>>({});
   const [practiceSubmitting, setPracticeSubmitting] = useState(false);
 
   const answersRef = useRef(answers);
@@ -335,10 +336,9 @@ export default function ExamSessionPage() {
     const img = answerImages[q.id] ?? undefined;
     if (!ans.trim() && !img) return;
     setPracticeSubmitting(true);
-    setPracticeResult(null);
     try {
       const result = await submitAttempt(sessionId, q.id, ans, img);
-      setPracticeResult(result);
+      setPracticeResults((prev) => ({ ...prev, [q.id]: result }));
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -347,14 +347,17 @@ export default function ExamSessionPage() {
   }
 
   function handleAnswerChange(questionId: string, value: string) {
-    setPracticeResult(null);
+    setPracticeResults((prev) => { const next = { ...prev }; delete next[questionId]; return next; });
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
   }
 
   function goToNext() {
     setCurrentIdx((i) => Math.min(i + 1, questions.length - 1));
-    setPracticeResult(null);
     setAnswerTab("text");
+  }
+
+  function handleRetry(questionId: string) {
+    setPracticeResults((prev) => { const next = { ...prev }; delete next[questionId]; return next; });
   }
 
   if (loading) return (
@@ -441,7 +444,7 @@ export default function ExamSessionPage() {
             return (
               <button
                 key={q.id}
-                onClick={() => { setCurrentIdx(i); setPracticeResult(null); setAnswerTab("text"); }}
+                onClick={() => { setCurrentIdx(i); setAnswerTab("text"); }}
                 className={cn(
                   "w-12 h-10 mx-auto rounded-lg text-xs font-semibold transition-all",
                   i === currentIdx
@@ -466,7 +469,7 @@ export default function ExamSessionPage() {
               return (
                 <button
                   key={q.id}
-                  onClick={() => { setCurrentIdx(i); setPracticeResult(null); }}
+                  onClick={() => { setCurrentIdx(i); }}
                   className={cn(
                     "shrink-0 w-9 h-9 rounded-lg text-xs font-semibold",
                     i === currentIdx ? "bg-primary text-primary-foreground" :
@@ -513,7 +516,7 @@ export default function ExamSessionPage() {
           {currentQ.image_url && <QuestionImage url={currentQ.image_url} />}
 
           {/* Answer area */}
-          {!practiceResult && (
+          {!practiceResults[currentQ.id] && (
             currentQ.question_type === "mcq" ? (
               <div className="grid grid-cols-1 gap-2.5">
                 {MCQ_OPTIONS.map((opt, idx) => {
@@ -581,7 +584,6 @@ export default function ExamSessionPage() {
                     imageUrl={answerImages[currentQ.id] ?? null}
                     onUpload={(url) => {
                       setAnswerImages((prev) => ({ ...prev, [currentQ.id]: url }));
-                      if (url) setPracticeResult(null);
                     }}
                   />
                 )}
@@ -590,7 +592,7 @@ export default function ExamSessionPage() {
           )}
 
           {/* Practice submit */}
-          {!isExamMode && !practiceResult && (
+          {!isExamMode && !practiceResults[currentQ.id] && (
             <Button
               onClick={handleSubmitPractice}
               disabled={practiceSubmitting || (!answers[currentQ.id]?.trim() && !answerImages[currentQ.id])}
@@ -603,20 +605,21 @@ export default function ExamSessionPage() {
           )}
 
           {/* Practice feedback */}
-          {practiceResult && (
+          {practiceResults[currentQ.id] && (
             <PracticeFeedback
-              result={practiceResult}
+              result={practiceResults[currentQ.id]}
               question={currentQ}
               onNext={goToNext}
+              onRetry={() => handleRetry(currentQ.id)}
             />
           )}
 
           {/* Navigation */}
-          {!practiceResult && (
+          {!practiceResults[currentQ.id] && (
             <div className="flex gap-3 pt-2">
               <Button
                 disabled={currentIdx === 0}
-                onClick={() => { setCurrentIdx((i) => i - 1); setPracticeResult(null); setAnswerTab("text"); }}
+                onClick={() => { setCurrentIdx((i) => i - 1); setAnswerTab("text"); }}
                 variant="outline"
                 size="lg"
                 className="flex-1"
@@ -625,7 +628,7 @@ export default function ExamSessionPage() {
               </Button>
               <Button
                 disabled={currentIdx === questions.length - 1}
-                onClick={() => { setCurrentIdx((i) => i + 1); setPracticeResult(null); setAnswerTab("text"); }}
+                onClick={() => { setCurrentIdx((i) => i + 1); setAnswerTab("text"); }}
                 variant="outline"
                 size="lg"
                 className="flex-1"

@@ -35,13 +35,30 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
     """
     Submit a single answer (practice mode). Marks synchronously and returns
     the attempt row with AI feedback.
+
+    Re-submissions for the same (session_id, question_id) are allowed — the
+    existing attempt is updated and re-marked instead of inserting a duplicate
+    (which would violate the unique constraint added in migration 002).
+    Re-submissions bypass the daily quota since no new question is consumed.
     """
-    # Quota check: determine question type first (MCQ is free, written counts against limit)
-    question_type = "written"
-    if body.session_id:
-        supabase_check = get_supabase()
+    supabase = get_supabase()
+
+    # Check whether this is a re-submission for the same question in this session
+    existing = (
+        supabase.table("attempt")
+        .select("id")
+        .eq("session_id", body.session_id)
+        .eq("question_id", body.question_id)
+        .maybe_single()
+        .execute()
+    )
+    is_resubmission = bool(existing and existing.data)
+
+    # Quota check: only applies to first-time submissions of written questions
+    if not is_resubmission:
+        question_type = "written"
         q_result = (
-            supabase_check.table("question")
+            supabase.table("question")
             .select("question_type")
             .eq("id", body.question_id)
             .maybe_single()
@@ -50,33 +67,45 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
         if q_result and q_result.data:
             question_type = q_result.data.get("question_type", "written")
 
-    quota = check_practice_quota(body.session_id, question_type)
-    if not quota.allowed:
-        raise HTTPException(
-            status_code=402,
-            detail={
-                "code": "quota_exceeded",
-                "tier": quota.tier,
-                "used": quota.used,
-                "limit": quota.limit,
-                "feature": "practice",
-                "message": f"Daily limit of {DAILY_FREE_LIMIT} questions reached. "
-                           "Upgrade to continue practising.",
-            },
-        )
+        quota = check_practice_quota(body.session_id, question_type)
+        if not quota.allowed:
+            raise HTTPException(
+                status_code=402,
+                detail={
+                    "code": "quota_exceeded",
+                    "tier": quota.tier,
+                    "used": quota.used,
+                    "limit": quota.limit,
+                    "feature": "practice",
+                    "message": f"Daily limit of {DAILY_FREE_LIMIT} questions reached. "
+                               "Upgrade to continue practising.",
+                },
+            )
 
-    supabase = get_supabase()
-    attempt_id = str(uuid.uuid4())
-
-    supabase.table("attempt").insert(
-        {
-            "id": attempt_id,
-            "session_id": body.session_id,
-            "question_id": body.question_id,
-            "student_answer": body.student_answer,
-            "answer_image_url": body.answer_image_url,
-        }
-    ).execute()
+    if is_resubmission:
+        attempt_id = existing.data["id"]
+        # Reset marking fields so mark_attempt re-marks with the new answer
+        supabase.table("attempt").update(
+            {
+                "student_answer": body.student_answer,
+                "answer_image_url": body.answer_image_url,
+                "ai_score": None,
+                "ai_feedback": None,
+                "ai_references": None,
+                "marked_at": None,
+            }
+        ).eq("id", attempt_id).execute()
+    else:
+        attempt_id = str(uuid.uuid4())
+        supabase.table("attempt").insert(
+            {
+                "id": attempt_id,
+                "session_id": body.session_id,
+                "question_id": body.question_id,
+                "student_answer": body.student_answer,
+                "answer_image_url": body.answer_image_url,
+            }
+        ).execute()
 
     # Synchronous marking for immediate feedback in practice mode
     mark_attempt(attempt_id)
