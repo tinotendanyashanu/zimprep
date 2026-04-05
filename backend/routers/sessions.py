@@ -72,6 +72,36 @@ def get_or_create_practice_session(body: PracticeSessionRequest) -> dict[str, An
     """Get existing or create a new long-lived practice session for a student+subject pair."""
     supabase = get_supabase()
 
+    # Verify the subject belongs to the student's exam_board + level
+    student_row = (
+        supabase.table("student")
+        .select("exam_board, level")
+        .eq("id", body.student_id)
+        .maybe_single()
+        .execute()
+    )
+    if student_row and student_row.data:
+        student_board = student_row.data.get("exam_board")
+        student_level = student_row.data.get("level")
+        subject_row = (
+            supabase.table("subject")
+            .select("exam_board, level")
+            .eq("id", body.subject_id)
+            .maybe_single()
+            .execute()
+        )
+        if subject_row and subject_row.data:
+            if student_board and subject_row.data.get("exam_board") != student_board:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Subject does not match your exam board",
+                )
+            if student_level and subject_row.data.get("level") != student_level:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Subject does not match your exam level",
+                )
+
     # Look for an existing active practice session linked to this subject
     existing = (
         supabase.table("session")
@@ -129,6 +159,37 @@ def create_session(body: CreateSessionRequest) -> dict[str, Any]:
     _ensure_student(body.student_id)
 
     supabase = get_supabase()
+
+    # Verify the paper's subject matches the student's exam_board + level
+    student_row = (
+        supabase.table("student")
+        .select("exam_board, level")
+        .eq("id", body.student_id)
+        .maybe_single()
+        .execute()
+    )
+    if student_row and student_row.data:
+        student_board = student_row.data.get("exam_board")
+        student_level = student_row.data.get("level")
+        paper_row = (
+            supabase.table("paper")
+            .select("subject!inner(exam_board, level)")
+            .eq("id", body.paper_id)
+            .maybe_single()
+            .execute()
+        )
+        if paper_row and paper_row.data:
+            subject = paper_row.data.get("subject", {})
+            if student_board and subject.get("exam_board") != student_board:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Paper does not match your exam board",
+                )
+            if student_level and subject.get("level") != student_level:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Paper does not match your exam level",
+                )
     session_id = str(uuid.uuid4())
     supabase.table("session").insert(
         {

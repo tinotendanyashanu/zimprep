@@ -29,14 +29,39 @@ def pick_next_question(
     Return the next question for a student using the adaptive algorithm.
 
     Steps:
-    1. Fetch all ready questions for the subject (filtered by topic if given).
-    2. Fetch student's recent attempt question IDs (last 20) to penalise.
-    3. Compute per-topic fail ratios from past marked attempts.
-    4. Score each question; pick via weighted random.
+    1. Verify the subject belongs to the student's exam_board + level.
+    2. Fetch all ready questions for the subject (filtered by topic if given).
+    3. Fetch student's recent attempt question IDs (last 20) to penalise.
+    4. Compute per-topic fail ratios from past marked attempts.
+    5. Score each question; pick via weighted random.
     """
     supabase = get_supabase()
 
-    # 1. Get all ready papers for this subject
+    # 1. Verify subject matches the student's board + level
+    student_row = (
+        supabase.table("student")
+        .select("exam_board, level")
+        .eq("id", student_id)
+        .maybe_single()
+        .execute()
+    )
+    if student_row and student_row.data:
+        student_board = student_row.data.get("exam_board")
+        student_level = student_row.data.get("level")
+        subject_row = (
+            supabase.table("subject")
+            .select("exam_board, level")
+            .eq("id", subject_id)
+            .maybe_single()
+            .execute()
+        )
+        if subject_row and subject_row.data:
+            if student_board and subject_row.data.get("exam_board") != student_board:
+                return None
+            if student_level and subject_row.data.get("level") != student_level:
+                return None
+
+    # 2. Get all ready papers for this subject
     papers = (
         supabase.table("paper")
         .select("id")
@@ -70,7 +95,8 @@ def pick_next_question(
     for q in questions:
         q["mcq_answer"] = mcq_map.get(q["id"])
 
-    # 3. Recently attempted question IDs (penalise to reduce repetition)
+    # 3. Fetch questions (optionally filtered by topic tag) — already done above as step 2
+    # 4. Recently attempted question IDs (penalise to reduce repetition)
     recent_result = (
         supabase.table("attempt")
         .select("question_id, session!inner(student_id)")
@@ -81,7 +107,7 @@ def pick_next_question(
     )
     recent_qids = {a["question_id"] for a in (recent_result.data or [])}
 
-    # 4. Per-topic fail ratios from all marked attempts on these questions
+    # 5. Per-topic fail ratios from all marked attempts on these questions
     all_topics = {tag for q in questions for tag in (q.get("topic_tags") or [])}
     topic_fail: dict[str, float | None] = {t: None for t in all_topics}
 
@@ -111,7 +137,7 @@ def pick_next_question(
             if scores:
                 topic_fail[t] = 1.0 - (sum(scores) / len(scores))
 
-    # 5. Score each question and pick via weighted random
+    # 6. Score each question and pick via weighted random
     def question_weight(q: dict[str, Any]) -> float:
         tags = q.get("topic_tags") or []
         w = max((_topic_weight(topic_fail.get(t)) for t in tags), default=1.0)

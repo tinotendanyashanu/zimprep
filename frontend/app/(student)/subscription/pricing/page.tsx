@@ -13,6 +13,7 @@ import {
   type TierConfig,
 } from "@/lib/subscription";
 import { getSubjects, type Subject } from "@/lib/api";
+import { useStudent } from "@/lib/student-context";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -141,7 +142,7 @@ function SubjectSelector({
 
 export default function PricingPage() {
   const router = useRouter();
-  const [studentId, setStudentId] = useState<string | null>(null);
+  const { id: studentId, examBoard, level } = useStudent();
   const [email, setEmail] = useState<string>("");
   const [token, setToken] = useState<string | null>(null);
   const [currentTier, setCurrentTier] = useState<Tier>("starter");
@@ -152,15 +153,14 @@ export default function PricingPage() {
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getSession().then(async ({ data }) => {
-      const user = data.session?.user;
-      if (!user) return;
-      setStudentId(user.id);
-      setEmail(user.email ?? "");
+    supabase.auth.getSession().then(({ data }) => {
+      setEmail(data.session?.user?.email ?? "");
       setToken(data.session?.access_token ?? null);
     });
-    getSubjects().then(setSubjects).catch(() => {});
-  }, []);
+    getSubjects(examBoard || undefined, level || undefined)
+      .then(setSubjects)
+      .catch(() => {});
+  }, [examBoard, level]);
 
   useEffect(() => {
     if (!studentId || !token) return;

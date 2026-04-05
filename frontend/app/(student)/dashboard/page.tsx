@@ -9,6 +9,7 @@ import {
   type WeakTopic,
   type SessionSummary,
 } from "@/lib/api";
+import { useStudent } from "@/lib/student-context";
 import { cn } from "@/lib/utils";
 import { QuotaBar } from "@/components/QuotaBar";
 import { PastDueBanner } from "@/components/PastDueBanner";
@@ -93,35 +94,23 @@ function CircularProgress({ value, size = 180, strokeWidth = 14 }: { value: numb
 // ── Main Dashboard ──────────────
 
 export default function DashboardPage() {
-  const [studentId, setStudentId] = useState<string | null>(null);
+  const { id: studentId, name } = useStudent();
   const [token, setToken] = useState<string | null>(null);
-  const [name, setName] = useState("");
   const [data, setData] = useState<DashboardData | null>(null);
   const [selectedSubject, setSelectedSubject] = useState<string | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const { quota, subscription } = useQuota();
 
+  // Fetch auth token (needed for the authed dashboard API call)
   useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getSession().then(async ({ data: session }) => {
-      const user = session?.session?.user;
-      const accessToken = session?.session?.access_token;
-      if (!user) return;
-      setStudentId(user.id);
-      setToken(accessToken ?? null);
-
-      const { data: student } = await supabase
-        .from("student")
-        .select("name")
-        .eq("id", user.id)
-        .single();
-      setName(student?.name ?? "");
+    createClient().auth.getSession().then(({ data: session }) => {
+      setToken(session?.session?.access_token ?? null);
     });
   }, []);
 
   useEffect(() => {
-    if (!studentId || !token) return;
+    if (!token) return;
     getStudentDashboard(studentId, selectedSubject, token)
       .then((d) => {
         setData(d);

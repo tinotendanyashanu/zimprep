@@ -281,12 +281,32 @@ def get_recent_sessions(student_id: str, limit: int = 10) -> list[dict[str, Any]
     return output
 
 
-def get_student_subjects(student_id: str) -> list[dict[str, Any]]:
-    """Return distinct subjects the student has attempted sessions for."""
+def _get_student_board_level(student_id: str) -> tuple[str | None, str | None]:
+    """Return (exam_board, level) for the student."""
     supabase = get_supabase()
     result = (
+        supabase.table("student")
+        .select("exam_board, level")
+        .eq("id", student_id)
+        .maybe_single()
+        .execute()
+    )
+    if result and result.data:
+        return result.data.get("exam_board"), result.data.get("level")
+    return None, None
+
+
+def get_student_subjects(student_id: str) -> list[dict[str, Any]]:
+    """
+    Return distinct subjects the student has attempted sessions for,
+    strictly filtered to their own exam_board and level.
+    """
+    supabase = get_supabase()
+    exam_board, level = _get_student_board_level(student_id)
+
+    result = (
         supabase.table("session")
-        .select("paper!inner(subject!inner(id, name, level))")
+        .select("paper!inner(subject!inner(id, name, level, exam_board))")
         .eq("student_id", student_id)
         .execute()
     )
@@ -295,8 +315,16 @@ def get_student_subjects(student_id: str) -> list[dict[str, Any]]:
     for r in rows:
         paper = r.get("paper", {})
         subject = paper.get("subject", {}) if paper else {}
-        if subject and subject.get("id") and subject["id"] not in seen:
-            seen[subject["id"]] = subject
+        if not subject or not subject.get("id"):
+            continue
+        # Strict board + level filter
+        if exam_board and subject.get("exam_board") != exam_board:
+            continue
+        if level and subject.get("level") != level:
+            continue
+        sid = subject["id"]
+        if sid not in seen:
+            seen[sid] = {"id": subject["id"], "name": subject["name"], "level": subject["level"]}
     return list(seen.values())
 
 
