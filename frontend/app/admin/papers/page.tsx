@@ -495,6 +495,7 @@ export default function AdminPapersPage() {
           </div>
         </div>
       )}
+    </div>
     </>
   );
 }
