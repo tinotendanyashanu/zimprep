@@ -33,8 +33,8 @@ from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 6
-_RETRY_BASE_DELAY = 10  # seconds; doubles each attempt (10, 20, 40, 80, 160, 320)
+_MAX_RETRIES = 4
+_RETRY_BASE_DELAY = 2  # seconds; doubles each attempt (2, 4, 8, 16)
 
 
 def _mistral_call_with_retry(fn, *args, **kwargs):
@@ -273,7 +273,7 @@ def _process_diagram(
     return page_url, False
 
 
-_INITIAL_BATCH_SIZE = 4  # Starting pages-per-batch; auto-halves on token overflow
+_INITIAL_BATCH_SIZE = 8  # Starting pages-per-batch; auto-halves on token overflow
 
 
 def _strip_json_fences(raw: str) -> str:

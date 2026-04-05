@@ -24,8 +24,8 @@ from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 4
-_RETRY_BASE_DELAY = 10  # seconds; doubles each attempt
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2  # seconds; doubles each attempt
 
 
 def _mistral_call_with_retry(fn, *args, **kwargs):
