@@ -102,15 +102,14 @@ export default function QuestionsQAPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-background flex items-center justify-center">
+      <div className="flex items-center justify-center py-20">
         <p className="text-muted-foreground text-sm">Loading questions…</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-5xl mx-auto space-y-6">
+    <div className="max-w-5xl space-y-6">
         {/* Header */}
         <div className="flex items-center gap-4">
           <a
@@ -301,7 +300,6 @@ export default function QuestionsQAPage() {
             ))}
           </div>
         )}
-      </div>
     </div>
   );
 }

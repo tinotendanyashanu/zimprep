@@ -205,13 +205,13 @@ export default function AdminPapersPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background p-8">
-      <div className="max-w-4xl mx-auto space-y-10">
+    <>
+    <div className="max-w-4xl space-y-8">
 
         {/* Header */}
         <div>
-          <h1 className="text-2xl font-semibold text-foreground">Paper Management</h1>
-          <p className="text-muted-foreground text-sm mt-1">Upload past papers and review extracted questions</p>
+          <h1 className="text-xl font-semibold text-foreground">Paper Management</h1>
+          <p className="text-muted-foreground text-sm mt-0.5">Upload past papers and review extracted questions</p>
         </div>
 
         {/* Upload form */}
@@ -459,8 +459,6 @@ export default function AdminPapersPage() {
           )}
         </div>
 
-      </div>
-
       {/* Delete confirmation modal */}
       {confirmDeleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
@@ -497,6 +495,6 @@ export default function AdminPapersPage() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }

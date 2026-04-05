@@ -271,6 +271,174 @@ def delete_paper(paper_id: str) -> dict[str, Any]:
     return {"deleted": paper_id}
 
 
+@router.get("/stats")
+def get_admin_stats() -> dict[str, Any]:
+    """High-level platform stats for the admin overview dashboard."""
+    supabase = get_supabase()
+
+    students_res = supabase.table("student").select("id", count="exact").execute()
+    papers_res = supabase.table("paper").select("id", count="exact").execute()
+    questions_res = supabase.table("question").select("id", count="exact").execute()
+    flagged_res = (
+        supabase.table("attempt")
+        .select("id", count="exact")
+        .eq("flagged", True)
+        .eq("flag_resolved", False)
+        .execute()
+    )
+    active_subs_res = (
+        supabase.table("subscription")
+        .select("id", count="exact")
+        .eq("status", "active")
+        .execute()
+    )
+    processing_res = (
+        supabase.table("paper")
+        .select("id", count="exact")
+        .eq("status", "processing")
+        .execute()
+    )
+    error_res = (
+        supabase.table("paper")
+        .select("id", count="exact")
+        .eq("status", "error")
+        .execute()
+    )
+
+    # Revenue: sum amount_usd for active subscriptions
+    revenue_res = (
+        supabase.table("subscription")
+        .select("amount_usd")
+        .eq("status", "active")
+        .execute()
+    )
+    monthly_revenue = sum(
+        float(row.get("amount_usd") or 0) for row in (revenue_res.data or [])
+    )
+
+    return {
+        "students": students_res.count or 0,
+        "papers": papers_res.count or 0,
+        "questions": questions_res.count or 0,
+        "flagged_attempts": flagged_res.count or 0,
+        "active_subscriptions": active_subs_res.count or 0,
+        "papers_processing": processing_res.count or 0,
+        "papers_error": error_res.count or 0,
+        "monthly_revenue_usd": round(monthly_revenue, 2),
+    }
+
+
+@router.get("/students")
+def list_students(
+    limit: int = 50,
+    offset: int = 0,
+    search: Optional[str] = None,
+    tier: Optional[str] = None,
+) -> dict[str, Any]:
+    """Paginated list of all students with subscription info."""
+    supabase = get_supabase()
+
+    query = supabase.table("student").select(
+        "id, name, email, level, exam_board, subscription_tier, created_at",
+        count="exact",
+    )
+    if search:
+        query = query.or_(f"name.ilike.%{search}%,email.ilike.%{search}%")
+    if tier:
+        query = query.eq("subscription_tier", tier)
+
+    result = query.order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+
+    return {
+        "total": result.count or 0,
+        "students": result.data or [],
+    }
+
+
+@router.get("/flagged-attempts")
+def list_flagged_attempts(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """List unresolved flagged attempts for manual review."""
+    supabase = get_supabase()
+
+    result = (
+        supabase.table("attempt")
+        .select(
+            "id, student_answer, answer_image_url, ai_score, ai_feedback, marked_at, flagged, flag_resolved, created_at, "
+            "session(student_id, paper_id, mode), "
+            "question(text, marks, question_number, topic_tags)",
+            count="exact",
+        )
+        .eq("flagged", True)
+        .eq("flag_resolved", False)
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+
+    return {
+        "total": result.count or 0,
+        "attempts": result.data or [],
+    }
+
+
+@router.patch("/attempts/{attempt_id}/resolve")
+def resolve_flagged_attempt(attempt_id: str) -> dict[str, Any]:
+    """Mark a flagged attempt as resolved."""
+    supabase = get_supabase()
+    result = (
+        supabase.table("attempt")
+        .update({"flag_resolved": True})
+        .eq("id", attempt_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Attempt not found")
+    return {"resolved": attempt_id}
+
+
+@router.get("/subscriptions")
+def list_subscriptions(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """List all subscriptions with student info."""
+    supabase = get_supabase()
+
+    result = (
+        supabase.table("subscription")
+        .select(
+            "id, tier, status, amount_usd, period_start, period_end, created_at, updated_at, student_id",
+            count="exact",
+        )
+        .order("created_at", desc=True)
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+
+    # Enrich with student name/email
+    enriched = []
+    student_ids = [r["student_id"] for r in (result.data or []) if r.get("student_id")]
+    student_map: dict[str, dict] = {}
+    if student_ids:
+        s_res = (
+            supabase.table("student")
+            .select("id, name, email")
+            .in_("id", student_ids)
+            .execute()
+        )
+        student_map = {s["id"]: s for s in (s_res.data or [])}
+
+    for row in (result.data or []):
+        s = student_map.get(row.get("student_id", ""), {})
+        enriched.append({
+            **row,
+            "student_name": s.get("name", "—"),
+            "student_email": s.get("email", "—"),
+        })
+
+    return {
+        "total": result.count or 0,
+        "subscriptions": enriched,
+    }
+
+
 @router.post("/paystack/create-plans")
 def create_paystack_plans() -> dict[str, Any]:
     """
