@@ -1,124 +1,88 @@
 "use client";
 
-import { useMemo } from "react";
-import katex from "katex";
+import ReactMarkdown from "react-markdown";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
+import rehypeRaw from "rehype-raw";
 import "katex/dist/katex.min.css";
 
 /**
- * Renders text that may contain LaTeX math expressions.
+ * Renders question text with full markdown formatting AND LaTeX math.
  *
- * Supported delimiters (matching the extraction pipeline output):
- *   \( ... \)   — inline math
- *   \[ ... \]   — display (block) math
- *
- * Everything outside delimiters is rendered as escaped plain text.
+ * Handles:
+ *   - Tables  (pipe syntax: | A | B | C |)
+ *   - Bold / italic  (**bold**, *italic*)
+ *   - Line breaks and paragraphs
+ *   - Inline math   \( ... \)
+ *   - Display math  \[ ... \]
+ *   - Bullet lists
  */
 
 interface MathTextProps {
   text: string;
   className?: string;
-  block?: boolean; // Use <div> instead of <span> for block-level content
+  block?: boolean; // kept for API compatibility — always renders as block internally
 }
 
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function renderMathText(text: string): string {
-  // Split on \( \) and \[ \] delimiters
-  // We process left-to-right, finding whichever opening delimiter comes first.
-  let html = "";
-  let rest = text;
-
-  while (rest.length > 0) {
-    const inlinePos = rest.indexOf("\\(");
-    const displayPos = rest.indexOf("\\[");
-
-    const hasInline = inlinePos !== -1;
-    const hasDisplay = displayPos !== -1;
-
-    // No more math delimiters — append the remainder as plain text
-    if (!hasInline && !hasDisplay) {
-      html += escapeHtml(rest);
-      break;
-    }
-
-    // Determine which delimiter comes first
-    const nextPos =
-      hasInline && hasDisplay
-        ? Math.min(inlinePos, displayPos)
-        : hasInline
-        ? inlinePos
-        : displayPos;
-
-    const isDisplay = hasDisplay && displayPos === nextPos;
-
-    // Append plain text before the delimiter
-    html += escapeHtml(rest.slice(0, nextPos));
-
-    if (isDisplay) {
-      // Display math: \[ ... \]
-      rest = rest.slice(nextPos + 2);
-      const end = rest.indexOf("\\]");
-      if (end === -1) {
-        // Unclosed — treat literally
-        html += escapeHtml("\\[" + rest);
-        break;
-      }
-      const math = rest.slice(0, end);
-      rest = rest.slice(end + 2);
-      try {
-        html += katex.renderToString(math.trim(), {
-          displayMode: true,
-          throwOnError: false,
-        });
-      } catch {
-        html += escapeHtml("\\[" + math + "\\]");
-      }
-    } else {
-      // Inline math: \( ... \)
-      rest = rest.slice(nextPos + 2);
-      const end = rest.indexOf("\\)");
-      if (end === -1) {
-        html += escapeHtml("\\(" + rest);
-        break;
-      }
-      const math = rest.slice(0, end);
-      rest = rest.slice(end + 2);
-      try {
-        html += katex.renderToString(math.trim(), {
-          displayMode: false,
-          throwOnError: false,
-        });
-      } catch {
-        html += escapeHtml("\\(" + math + "\\)");
-      }
-    }
-  }
-
-  return html;
-}
-
-export function MathText({ text, className, block }: MathTextProps) {
-  const html = useMemo(() => renderMathText(text), [text]);
-
-  if (block) {
-    return (
-      <div
-        className={className}
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    );
-  }
-
+export function MathText({ text, className }: MathTextProps) {
   return (
-    <span
-      className={className}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <div className={className}>
+      <ReactMarkdown
+        remarkPlugins={[remarkMath]}
+        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        components={{
+          // Tables — styled to look like clean exam-paper tables
+          table: ({ children }) => (
+            <div className="overflow-x-auto my-3">
+              <table className="w-full border-collapse text-sm">
+                {children}
+              </table>
+            </div>
+          ),
+          thead: ({ children }) => (
+            <thead className="bg-muted/60">{children}</thead>
+          ),
+          th: ({ children }) => (
+            <th className="border border-border px-3 py-2 text-left font-semibold text-foreground">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="border border-border px-3 py-2 text-foreground">
+              {children}
+            </td>
+          ),
+          tr: ({ children }) => (
+            <tr className="even:bg-muted/20">{children}</tr>
+          ),
+          // Paragraphs — avoid double spacing inside question text
+          p: ({ children }) => (
+            <p className="mb-1 last:mb-0 leading-relaxed">{children}</p>
+          ),
+          // Bold
+          strong: ({ children }) => (
+            <strong className="font-semibold text-foreground">{children}</strong>
+          ),
+          // Unordered lists (e.g. bullet points in multi-part questions)
+          ul: ({ children }) => (
+            <ul className="list-disc pl-5 space-y-0.5 my-1">{children}</ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="list-decimal pl-5 space-y-0.5 my-1">{children}</ol>
+          ),
+          li: ({ children }) => (
+            <li className="leading-relaxed">{children}</li>
+          ),
+          // Blockquotes — used for indented sub-parts sometimes
+          blockquote: ({ children }) => (
+            <blockquote className="border-l-2 border-border pl-3 text-muted-foreground my-1">
+              {children}
+            </blockquote>
+          ),
+        }}
+      >
+        {text}
+      </ReactMarkdown>
+    </div>
   );
 }

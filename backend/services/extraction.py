@@ -51,6 +51,11 @@ QUESTION EXTRACTION RULES:
 - marks: integer mark value. Parse from "[2]" or "(2 marks)" etc. Use 0 if not shown.
 - text: the question stem ONLY — do NOT include A/B/C/D option lines in this field.
   For MCQ, text is the question before the options. Preserve all math in LaTeX.
+  Use Markdown formatting where appropriate:
+    - Use | pipe tables for any table in the question (e.g. comparison tables, data tables)
+    - Use **bold** for emphasis or column headers already bold in the paper
+    - Use \n for line breaks between parts
+    - Do NOT use heading markers (#) — just plain text with tables/bold as needed
 - has_image: true if the question contains or references a diagram, graph, figure, or table
 - image_bbox: ONLY when has_image is true — the bounding box of the diagram/figure as
   [x0, y0, x1, y1] where each value is a fraction of the page (0.0=top-left, 1.0=bottom-right).
