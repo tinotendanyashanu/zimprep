@@ -23,6 +23,7 @@ type Stats = {
   papers_error: number;
   // Moderation
   flagged_attempts: number;
+  diagram_review_count: number;
   // Revenue
   active_subscriptions: number;
   monthly_revenue_usd: number;
@@ -317,6 +318,19 @@ export default function AdminOverviewPage() {
             icon={
               <svg className={`w-4.5 h-4.5 ${s.flagged_attempts > 0 ? "text-orange-500" : "text-muted-foreground"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
                 <path strokeLinecap="round" strokeLinejoin="round" d="M3 3v1.5M3 21v-6m0 0l2.77-.693a9 9 0 016.208.682l.108.054a9 9 0 006.086.71l3.114-.732a48.524 48.524 0 01-.005-10.499l-3.11.732a9 9 0 01-6.085-.711l-.108-.054a9 9 0 00-6.208-.682L3 4.5M3 15V4.5" />
+              </svg>
+            }
+          />
+          <MetricCard
+            label="Diagram Review"
+            value={s.diagram_review_count ?? 0}
+            sub={(s.diagram_review_count ?? 0) === 0 ? "All diagrams extracted" : "Questions hidden from students"}
+            accent={(s.diagram_review_count ?? 0) > 0 ? "bg-amber-50" : "bg-muted"}
+            href="/admin/diagrams"
+            trend={(s.diagram_review_count ?? 0) > 0 ? { direction: "down", label: "Needs image" } : { direction: "neutral", label: "Clear" }}
+            icon={
+              <svg className={`w-4.5 h-4.5 ${(s.diagram_review_count ?? 0) > 0 ? "text-amber-500" : "text-muted-foreground"}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.75}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
               </svg>
             }
           />
@@ -646,6 +660,20 @@ export default function AdminOverviewPage() {
             {s.flagged_attempts > 0 && (
               <span className="ml-0.5 bg-orange-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
                 {s.flagged_attempts}
+              </span>
+            )}
+          </Link>
+          <Link
+            href="/admin/diagrams"
+            className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-card border border-border text-foreground text-xs font-medium rounded-lg hover:bg-muted/40 transition"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 15.75l5.159-5.159a2.25 2.25 0 013.182 0l5.159 5.159m-1.5-1.5l1.409-1.409a2.25 2.25 0 013.182 0l2.909 2.909m-18 3.75h16.5a1.5 1.5 0 001.5-1.5V6a1.5 1.5 0 00-1.5-1.5H3.75A1.5 1.5 0 002.25 6v12a1.5 1.5 0 001.5 1.5zm10.5-11.25h.008v.008h-.008V8.25zm.375 0a.375.375 0 11-.75 0 .375.375 0 01.75 0z" />
+            </svg>
+            Review Diagrams
+            {(s.diagram_review_count ?? 0) > 0 && (
+              <span className="ml-0.5 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">
+                {s.diagram_review_count}
               </span>
             )}
           </Link>

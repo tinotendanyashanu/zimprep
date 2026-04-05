@@ -11,6 +11,8 @@ from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, Uploa
 from pydantic import BaseModel
 from typing import Any, Optional
 
+IMAGE_BUCKET = "question-images"
+
 from db.client import get_supabase
 from db.models_subscription import TIER_CONFIG, PAID_TIERS, PAYSTACK_PLAN_NAMES
 from services.extraction import run_extraction
@@ -306,6 +308,13 @@ def get_admin_stats() -> dict[str, Any]:
         .execute()
     )
 
+    diagram_review_res = (
+        supabase.table("question")
+        .select("id", count="exact")
+        .eq("diagram_status", "failed")
+        .execute()
+    )
+
     # ── Subscriptions & revenue ───────────────────────────────────────────────
     active_subs_res = (
         supabase.table("subscription").select("id", count="exact").eq("status", "active").execute()
@@ -422,6 +431,7 @@ def get_admin_stats() -> dict[str, Any]:
         "papers_error": error_res.count or 0,
         # Moderation
         "flagged_attempts": flagged_res.count or 0,
+        "diagram_review_count": diagram_review_res.count or 0,
         # Revenue
         "active_subscriptions": active_subs_res.count or 0,
         "monthly_revenue_usd": round(monthly_revenue, 2),
@@ -552,6 +562,107 @@ def list_subscriptions(limit: int = 50, offset: int = 0) -> dict[str, Any]:
         "total": result.count or 0,
         "subscriptions": enriched,
     }
+
+
+@router.get("/questions/diagram-review")
+def list_diagram_review_questions(limit: int = 50, offset: int = 0) -> dict[str, Any]:
+    """
+    List questions where diagram extraction failed and admin correction is needed.
+    These questions are hidden from students until fixed.
+    """
+    supabase = get_supabase()
+    result = (
+        supabase.table("question")
+        .select(
+            "id, question_number, sub_question, section, marks, text, has_image, image_url, "
+            "topic_tags, question_type, diagram_status, paper_id, "
+            "paper(year, paper_number, subject(name, level))",
+            count="exact",
+        )
+        .eq("diagram_status", "failed")
+        .order("paper_id")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return {
+        "total": result.count or 0,
+        "questions": result.data or [],
+    }
+
+
+@router.post("/questions/{question_id}/fix-diagram")
+async def fix_diagram(
+    question_id: str,
+    file: UploadFile = File(...),
+) -> dict[str, Any]:
+    """
+    Upload a corrected diagram image for a question and mark it as fixed.
+    Accepts PNG, JPG, or SVG.
+    """
+    allowed_types = ("image/png", "image/jpeg", "image/svg+xml", "application/octet-stream")
+    if file.content_type not in allowed_types:
+        raise HTTPException(status_code=400, detail="Only PNG, JPEG, or SVG images are accepted")
+
+    supabase = get_supabase()
+
+    # Verify question exists and needs review
+    q_res = (
+        supabase.table("question")
+        .select("id, paper_id, diagram_status")
+        .eq("id", question_id)
+        .maybe_single()
+        .execute()
+    )
+    if not q_res or not q_res.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    img_bytes = await file.read()
+    ext = "svg" if file.content_type == "image/svg+xml" else ("jpg" if file.content_type == "image/jpeg" else "png")
+    content_type = file.content_type if file.content_type != "application/octet-stream" else "image/png"
+
+    paper_id = q_res.data["paper_id"]
+    storage_path = f"{paper_id}/diagram_admin_{question_id}.{ext}"
+
+    try:
+        supabase.storage.from_(IMAGE_BUCKET).upload(
+            storage_path,
+            img_bytes,
+            file_options={"content-type": content_type, "upsert": "true"},
+        )
+        image_url = supabase.storage.from_(IMAGE_BUCKET).get_public_url(storage_path)
+    except Exception as exc:
+        logger.error("Diagram upload failed for question %s: %s", question_id, exc)
+        raise HTTPException(status_code=500, detail=f"Image upload failed: {exc}")
+
+    # Update question
+    result = (
+        supabase.table("question")
+        .update({"image_url": image_url, "has_image": True, "diagram_status": "fixed"})
+        .eq("id", question_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    return {"question_id": question_id, "image_url": image_url, "diagram_status": "fixed"}
+
+
+@router.patch("/questions/{question_id}/no-diagram")
+def mark_no_diagram(question_id: str) -> dict[str, Any]:
+    """
+    Mark a question as having no diagram (the diagram reference in the text
+    was a mistake or the question is self-contained). Clears has_image.
+    """
+    supabase = get_supabase()
+    result = (
+        supabase.table("question")
+        .update({"has_image": False, "image_url": None, "diagram_status": "ok"})
+        .eq("id", question_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"question_id": question_id, "diagram_status": "ok"}
 
 
 @router.post("/paystack/create-plans")

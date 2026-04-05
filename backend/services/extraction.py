@@ -219,17 +219,20 @@ def _process_diagram(
     paper_id: str,
     q_key: str,
     page_url: str | None,
-) -> str | None:
+) -> tuple[str | None, bool]:
     """
-    Crop the diagram region, attempt SVG redraw, upload, and return the URL.
-    Falls back to the full page URL if anything fails.
+    Crop the diagram region, attempt SVG redraw, upload, and return (url, is_ok).
+
+    is_ok=True  → a proper diagram image (SVG or tight-cropped PNG) was stored.
+    is_ok=False → fell back to the full page URL or have nothing useful; the
+                  question should be quarantined for admin review.
     """
     if bbox_frac is None:
-        return page_url
+        return page_url, False
 
     cropped = _crop_diagram_region(pdf_bytes, page_index, bbox_frac)
     if cropped is None:
-        return page_url
+        return page_url, False
 
     # Try SVG redraw first
     svg = _redraw_as_svg(cropped)
@@ -239,16 +242,16 @@ def _process_diagram(
         url = _upload_image(svg_bytes, path, "image/svg+xml")
         if url:
             logger.info("SVG diagram stored: %s", path)
-            return url
+            return url, True
 
     # Fall back to cropped PNG
     path = f"{paper_id}/diagram_{q_key}.png"
     url = _upload_image(cropped, path, "image/png")
     if url:
         logger.info("Cropped PNG diagram stored: %s", path)
-        return url
+        return url, True
 
-    return page_url
+    return page_url, False
 
 
 _INITIAL_BATCH_SIZE = 8  # Starting pages-per-batch; auto-halves on token overflow
@@ -414,6 +417,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             page_idx = max(0, min(page_num - 1, len(page_urls) - 1))
             has_image = bool(q.get("has_image", False))
             image_url = None
+            diagram_status = "ok"
 
             if has_image:
                 bbox_frac = q.get("image_bbox")
@@ -426,7 +430,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                     and bbox_frac[1] < bbox_frac[3]
                 ):
                     q_key = f"q{q_idx:04d}_p{page_idx:04d}"
-                    image_url = _process_diagram(
+                    image_url, diagram_ok = _process_diagram(
                         pdf_bytes,
                         page_idx,
                         bbox_frac,
@@ -434,9 +438,15 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                         q_key,
                         page_urls[page_idx],
                     )
+                    diagram_status = "ok" if diagram_ok else "failed"
                 else:
-                    # No valid bbox — fall back to full page
+                    # No valid bbox from Claude — quarantine for admin review
                     image_url = page_urls[page_idx]
+                    diagram_status = "failed"
+                    logger.warning(
+                        "Question %d has_image=True but no valid bbox — flagged for diagram review",
+                        q_idx,
+                    )
 
             q_type = q.get("question_type", "written")
             options = q.get("options") if q_type == "mcq" else None
@@ -450,6 +460,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 "text": str(q.get("text", "")),
                 "has_image": has_image,
                 "image_url": image_url,
+                "diagram_status": diagram_status,
                 "topic_tags": q.get("topic_tags", []),
                 "question_type": q_type,
                 "mcq_options": options,

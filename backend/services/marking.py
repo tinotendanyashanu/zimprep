@@ -45,39 +45,33 @@ _FALLBACK_RESULT: dict[str, Any] = {
 }
 
 
-def _mcq_ai_feedback(
+def _mcq_static_note(
     question: dict[str, Any],
     given: str,
     correct: str,
-    subject: dict[str, Any],
-) -> str | None:
+) -> str:
     """
-    Call Claude Haiku for a one-sentence MCQ explanation.
-    Returns the explanation string, or None on failure.
+    Build an instant, zero-cost examiner note for an MCQ result.
+
+    Shows the correct option letter and its text (if mcq_options are stored),
+    plus a brief note when the student was wrong.
     """
-    try:
-        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-        is_correct = given == correct
-        options_text = ""
-        if question.get("mcq_options"):
-            for opt in question["mcq_options"]:
-                options_text += f"\n  {opt['letter']}. {opt['text']}"
-        prompt = (
-            f"Subject: {subject.get('name', '')} ({subject.get('level', '')})\n"
-            f"Question: {question['text']}{options_text}\n"
-            f"Student answered: {given}. Correct answer: {correct}.\n"
-            f"In one concise sentence, explain why {correct} is correct"
-            + (f" and why {given} is wrong." if not is_correct else ".")
-        )
-        msg = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=150,
-            messages=[{"role": "user", "content": prompt}],
-        )
-        return msg.content[0].text.strip()
-    except Exception as exc:
-        logger.warning("MCQ AI feedback failed: %s", exc)
-        return None
+    # Try to find the option text for the correct answer
+    correct_text = ""
+    if question.get("mcq_options"):
+        for opt in question["mcq_options"]:
+            if opt.get("letter") == correct:
+                correct_text = opt.get("text", "")
+                break
+
+    if given == correct:
+        if correct_text:
+            return f"Correct. {correct} — {correct_text}"
+        return "Correct."
+    else:
+        if correct_text:
+            return f"The correct answer is {correct} — {correct_text}."
+        return f"The correct answer is {correct}."
 
 
 def _update_attempt(attempt_id: str, result: dict[str, Any], marks: int) -> None:
@@ -134,14 +128,12 @@ def mark_attempt(attempt_id: str) -> None:
         if mcq_row and mcq_row.data:
             correct = mcq_row.data["correct_option"]
             is_correct = given == correct
-            # Brief AI explanation for MCQ
-            ai_explanation = _mcq_ai_feedback(question, given, correct, subject)
             result = {
                 "score": marks if is_correct else 0,
                 "feedback": {
                     "correct_points": [f"You selected {given} — correct!"] if is_correct else [],
                     "missing_points": [] if is_correct else [f"You selected {given}. The correct answer is {correct}."],
-                    "examiner_note": ai_explanation or ("Correct." if is_correct else f"The correct answer is {correct}."),
+                    "examiner_note": _mcq_static_note(question, given, correct),
                 },
                 "references": [],
             }

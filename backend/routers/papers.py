@@ -68,6 +68,7 @@ def list_questions_for_paper(paper_id: str) -> list[dict[str, Any]]:
         supabase.table("question")
         .select("*")
         .eq("paper_id", paper_id)
+        .neq("diagram_status", "failed")   # hide questions pending diagram review
         .order("question_number")
         .execute()
     )
