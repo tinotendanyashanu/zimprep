@@ -37,25 +37,47 @@ _MAX_RETRIES = 4
 _RETRY_BASE_DELAY = 2  # seconds; doubles each attempt (2, 4, 8, 16)
 
 
+_RETRYABLE_STATUS = {"429", "502", "503", "504"}
+
+
+def _is_retryable(exc: SDKError) -> bool:
+    s = str(exc)
+    return any(code in s for code in _RETRYABLE_STATUS) or "rate_limited" in s.lower()
+
+
+def _retry_after_seconds(exc: SDKError) -> int | None:
+    """Return the Retry-After header value if Mistral included one, else None."""
+    try:
+        raw = exc.raw_response
+        if raw is not None and hasattr(raw, "headers"):
+            val = raw.headers.get("retry-after") or raw.headers.get("Retry-After")
+            if val:
+                return int(val)
+    except Exception:
+        pass
+    return None
+
+
 def _mistral_call_with_retry(fn, *args, **kwargs):
     """
-    Call a Mistral SDK function, retrying on 429 rate-limit responses with
-    exponential back-off. Raises the last exception if all retries are exhausted.
+    Call a Mistral SDK function, retrying on 429 / 502 / 503 / 504 responses.
+    Respects Retry-After when present; falls back to exponential back-off.
     """
     delay = _RETRY_BASE_DELAY
     for attempt in range(_MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
         except SDKError as exc:
-            if "429" in str(exc) or "rate_limited" in str(exc).lower():
-                if attempt < _MAX_RETRIES - 1:
-                    logger.warning(
-                        "Mistral rate-limit hit (attempt %d/%d) — waiting %ds before retry",
-                        attempt + 1, _MAX_RETRIES, delay,
-                    )
-                    time.sleep(delay)
-                    delay *= 2
-                    continue
+            if _is_retryable(exc) and attempt < _MAX_RETRIES - 1:
+                wait = _retry_after_seconds(exc) or delay
+                status = "rate-limit" if "429" in str(exc) else "gateway error"
+                logger.warning(
+                    "Mistral %s (attempt %d/%d) — waiting %ds",
+                    status, attempt + 1, _MAX_RETRIES, wait,
+                )
+                time.sleep(wait)
+                delay = max(delay * 2, wait + 1)
+                continue
             raise
     raise RuntimeError("Mistral call failed after all retries")
 
@@ -116,14 +138,19 @@ Rules:
 - No explanation, no markdown fences, no preamble"""
 
 
-def _render_pages(pdf_bytes: bytes, dpi: int = 150) -> list[bytes]:
-    """Render every PDF page to PNG bytes at the given DPI."""
+def _render_pages(pdf_bytes: bytes, dpi: int = 100) -> list[bytes]:
+    """
+    Render every PDF page to JPEG bytes at the given DPI.
+
+    100 DPI + JPEG at 80 % quality is sufficient for Pixtral to read text
+    and is ~10× smaller than 150 DPI PNG, cutting token usage dramatically.
+    """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages: list[bytes] = []
     mat = fitz.Matrix(dpi / 72, dpi / 72)
     for page in doc:
         pix = page.get_pixmap(matrix=mat)
-        pages.append(pix.tobytes("png"))
+        pages.append(pix.tobytes("jpeg", jpg_quality=80))
     doc.close()
     return pages
 
@@ -273,7 +300,7 @@ def _process_diagram(
     return page_url, False
 
 
-_INITIAL_BATCH_SIZE = 8  # Starting pages-per-batch; auto-halves on token overflow
+_INITIAL_BATCH_SIZE = 2  # 2 pages per call keeps each request well under the 90s Cloudflare timeout
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -330,7 +357,7 @@ def _call_mistral_for_pages(
     content: list[dict] = []
     for i, img_bytes in enumerate(page_images):
         b64 = base64.standard_b64encode(img_bytes).decode()
-        data_url = f"data:image/png;base64,{b64}"
+        data_url = f"data:image/jpeg;base64,{b64}"
         content.append({"type": "image_url", "image_url": {"url": data_url}})
         content.append({"type": "text", "text": f"[Page {page_offset + i + 1}]"})
 
@@ -341,7 +368,7 @@ def _call_mistral_for_pages(
 
     response = _mistral_call_with_retry(
         client.chat.complete,
-        model="pixtral-large-latest",
+        model="pixtral-12b-2409",
         max_tokens=8192,
         messages=[
             {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
@@ -355,19 +382,47 @@ def _call_mistral_for_pages(
     return _recover_partial_json_array(raw), hit_limit
 
 
+def _call_gemini_for_pages(
+    page_images: list[bytes],
+    page_offset: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """
+    Send a batch of page images to Google Gemini 2.0 Flash and return
+    (questions, hit_token_limit). Used as fallback when Mistral fails.
+    """
+    import google.generativeai as genai
+
+    genai.configure(api_key=os.environ["GOOGLE_AI_API_KEY"])
+    model = genai.GenerativeModel(
+        "gemini-2.0-flash",
+        system_instruction=EXTRACTION_SYSTEM_PROMPT,
+    )
+
+    parts: list[Any] = []
+    for i, img_bytes in enumerate(page_images):
+        b64 = base64.standard_b64encode(img_bytes).decode()
+        parts.append({"inline_data": {"mime_type": "image/jpeg", "data": b64}})
+        parts.append(f"[Page {page_offset + i + 1}]")
+    parts.append("Extract all questions from these exam paper pages. Return JSON array only.")
+
+    response = model.generate_content(parts)
+    raw = _strip_json_fences(response.text or "")
+    return _recover_partial_json_array(raw), False
+
+
 def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]]:
     """
     Extract questions from all pages using adaptive batching.
 
-    Starts with _INITIAL_BATCH_SIZE pages per Pixtral call. If a call hits the
-    output token limit the batch is automatically halved and retried — down to
-    1 page at a time if needed — so extraction always completes regardless of
-    paper density. After a successful smaller batch the size grows back up.
+    Primary: Mistral Pixtral. If a batch fails (any exception), Gemini 2.0 Flash
+    is used as a fallback for that batch before giving up.
 
-    Admin just uploads a PDF; this function handles everything.
+    Starts with _INITIAL_BATCH_SIZE pages per call. If a call hits the output
+    token limit the batch is automatically halved and retried — down to 1 page
+    at a time if needed. After a successful smaller batch the size grows back up.
     """
     # 5-minute timeout — batches of page images can be large and slow to process
-    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=300_000)
+    mistral_client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=300_000)
     results: list[dict[str, Any]] = []
 
     i = 0
@@ -375,7 +430,27 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
 
     while i < len(page_images):
         batch = page_images[i: i + batch_size]
-        questions, hit_limit = _call_mistral_for_pages(client, batch, page_offset=i)
+
+        questions: list[dict[str, Any]] = []
+        hit_limit = False
+        try:
+            questions, hit_limit = _call_mistral_for_pages(mistral_client, batch, page_offset=i)
+        except Exception as exc:
+            logger.warning(
+                "Mistral extraction failed for pages %d–%d (%s) — trying Gemini fallback",
+                i + 1, i + len(batch), exc,
+            )
+            try:
+                questions, hit_limit = _call_gemini_for_pages(batch, page_offset=i)
+                logger.info(
+                    "Gemini fallback succeeded for pages %d–%d: %d questions",
+                    i + 1, i + len(batch), len(questions),
+                )
+            except Exception as gemini_exc:
+                logger.error(
+                    "Gemini fallback also failed for pages %d–%d: %s — skipping batch",
+                    i + 1, i + len(batch), gemini_exc,
+                )
 
         if hit_limit and batch_size > 1:
             # Too dense — halve and retry the same position
@@ -396,6 +471,10 @@ def _parse_questions_from_pages(page_images: list[bytes]) -> list[dict[str, Any]
         # Gradually grow batch size back toward the initial value after success
         if not hit_limit and batch_size < _INITIAL_BATCH_SIZE:
             batch_size = min(_INITIAL_BATCH_SIZE, batch_size * 2)
+
+        # Pause between batches — keeps us well under rate limits
+        if i < len(page_images):
+            time.sleep(3)
 
     return results
 
@@ -430,7 +509,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
         # 3. Extract questions via Pixtral vision
         questions = _parse_questions_from_pages(page_images)
-        logger.info("Mistral extracted %d questions for paper %s", len(questions), paper_id)
+        logger.info("Extracted %d questions for paper %s", len(questions), paper_id)
 
         # 4 & 5. Process diagrams and build DB rows
         rows = []

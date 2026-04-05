@@ -1,12 +1,12 @@
 """
 AI Marking Service
 
-Marks student attempts using Claude with cost optimisations:
-- MCQ: answer key lookup (zero Claude cost)
-- Haiku for ≤3 mark questions, Sonnet for >3 marks
+Marks student attempts with cost optimisations:
+- MCQ: answer key lookup (zero AI cost)
+- Mistral small for ≤3 mark questions (fast + cheap)
+- Google Gemini 2.0 Flash for >3 mark questions (higher quality)
 - Exact answer caching (same question+answer = reuse result)
-- Empty/trivial answers score 0 without calling Claude
-- 20-char minimum for written answers
+- Empty/trivial answers score 0 without calling AI
 """
 from __future__ import annotations
 
@@ -232,40 +232,65 @@ def mark_attempt(attempt_id: str) -> None:
         _update_attempt(attempt_id, result, marks)
         return
 
-    # ── Mistral marking ────────────────────────────────────────────────────────
-    # mistral-small for ≤3 mark questions (fast + cheap), mistral-large for longer answers
-    model = "mistral-small-latest" if marks <= 3 else "mistral-large-latest"
-    client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=60_000)
-
     prompt = (
         f"Subject: {subject['name']} ({subject['level']})\n"
         f"Question ({marks} mark{'s' if marks != 1 else ''}): {question['text']}\n"
         f"Student Answer: {student_answer}"
     )
 
-    try:
-        response = _mistral_call_with_retry(
-            client.chat.complete,
-            model=model,
-            max_tokens=1024,
-            messages=[
-                {"role": "system", "content": MARKING_SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-        )
-        raw = (response.choices[0].message.content or "").strip()
-        # Strip markdown fences if the model wrapped the JSON
+    def _strip_fences(raw: str) -> str:
+        raw = raw.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
             raw = raw.strip()
-        result = json.loads(raw)
-    except Exception as exc:
-        logger.error("Mistral marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
-        result = dict(_FALLBACK_RESULT)
+        return raw
 
-    _update_attempt(attempt_id, result, marks)
+    result: dict[str, Any] | None = None
+
+    # ── Simple questions (≤3 marks): Mistral small ─────────────────────────────
+    if marks <= 3:
+        try:
+            client = Mistral(api_key=os.environ["MISTRAL_API_KEY"], timeout_ms=60_000)
+            response = _mistral_call_with_retry(
+                client.chat.complete,
+                model="mistral-small-latest",
+                max_tokens=1024,
+                messages=[
+                    {"role": "system", "content": MARKING_SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+            )
+            raw = _strip_fences(response.choices[0].message.content or "")
+            result = json.loads(raw)
+        except Exception as exc:
+            logger.error(
+                "Mistral marking failed for attempt %s: %s", attempt_id, exc, exc_info=True
+            )
+
+    # ── Complex questions (>3 marks): Google Gemini 2.0 Flash ──────────────────
+    if result is None:
+        try:
+            import google.generativeai as genai
+
+            genai.configure(api_key=os.environ["GOOGLE_AI_API_KEY"])
+            model = genai.GenerativeModel(
+                "gemini-2.0-flash",
+                system_instruction=MARKING_SYSTEM_PROMPT,
+            )
+            response = model.generate_content(prompt)
+            raw = _strip_fences(response.text or "")
+            result = json.loads(raw)
+            if marks <= 3:
+                logger.info("Gemini fallback used for attempt %s (Mistral failed)", attempt_id)
+        except Exception as exc:
+            logger.error(
+                "Gemini marking failed for attempt %s: %s", attempt_id, exc, exc_info=True
+            )
+            result = dict(_FALLBACK_RESULT)
+
+    _update_attempt(attempt_id, result or _FALLBACK_RESULT, marks)
 
 
 def mark_session(session_id: str) -> None:
