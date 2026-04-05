@@ -49,7 +49,8 @@ QUESTION EXTRACTION RULES:
 - sub_question: letter or roman numeral for sub-parts ("a", "b", "i", "ii") or null
 - section: section label ("A", "B", "C") or null
 - marks: integer mark value. Parse from "[2]" or "(2 marks)" etc. Use 0 if not shown.
-- text: the full question text with all math in LaTeX. Preserve all wording exactly.
+- text: the question stem ONLY — do NOT include A/B/C/D option lines in this field.
+  For MCQ, text is the question before the options. Preserve all math in LaTeX.
 - has_image: true if the question contains or references a diagram, graph, figure, or table
 - image_bbox: ONLY when has_image is true — the bounding box of the diagram/figure as
   [x0, y0, x1, y1] where each value is a fraction of the page (0.0=top-left, 1.0=bottom-right).
@@ -57,6 +58,11 @@ QUESTION EXTRACTION RULES:
   Example: a diagram in the middle of the page might be [0.05, 0.35, 0.95, 0.65]
   If you cannot determine the position, use null.
 - question_type: "mcq" if A/B/C/D options are listed, otherwise "written"
+- options: ONLY for MCQ questions — array of {letter, text} for each option.
+  Example: [{"letter":"A","text":"Hydrogen"},{"letter":"B","text":"Oxygen"},...]
+  Use null for written questions.
+- correct_option: ONLY if the answer key is printed on the paper — "A", "B", "C", or "D".
+  Use null if not shown (most question papers do not show the answer).
 - topic_tags: 1–3 short topic labels e.g. ["Quadratic Equations"] or ["Acids and Bases"]
 - page_number: the 1-based page number where this question appears (use the [Page N] labels)
 
@@ -72,8 +78,7 @@ Rules:
 - Use <text> for all labels, font-family="serif", appropriate font-size
 - Use <line>, <path>, <circle>, <rect>, <polygon> for shapes
 - Use <marker> with arrowhead for arrows
-- Return ONLY the SVG code, starting with <svg and ending with </svg>
-- No markdown fences, no explanation, no comments outside the SVG"""
+- Continue directly from the <svg tag already started — do NOT repeat it"""
 
 
 def _render_pages(pdf_bytes: bytes, dpi: int = 150) -> list[bytes]:
@@ -126,6 +131,7 @@ def _crop_diagram_region(
 def _redraw_as_svg(image_bytes: bytes) -> str | None:
     """
     Ask Claude to recreate a diagram image as clean SVG.
+    Uses assistant prefill (<svg) to force SVG output directly.
     Returns the SVG string if successful, otherwise None.
     """
     try:
@@ -133,44 +139,43 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
         b64 = base64.standard_b64encode(image_bytes).decode()
 
         msg = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=4096,
-            messages=[{
-                "role": "user",
-                "content": [
-                    {
-                        "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": "image/png",
-                            "data": b64,
+            model="claude-haiku-4-5-20251001",
+            max_tokens=6000,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": b64,
+                            },
                         },
-                    },
-                    {"type": "text", "text": SVG_REDRAW_PROMPT},
-                ],
-            }],
+                        {"type": "text", "text": SVG_REDRAW_PROMPT},
+                    ],
+                },
+                # Prefill forces Claude to start the response with <svg
+                {
+                    "role": "assistant",
+                    "content": "<svg",
+                },
+            ],
         )
 
-        result = msg.content[0].text.strip()
-        # Strip markdown fences if present
-        if "```" in result:
-            for line in result.split("```"):
-                stripped = line.strip()
-                if stripped.startswith("<svg") or "<svg" in stripped:
-                    result = stripped
-                    break
+        # The response continues from where our prefill left off
+        tail = msg.content[0].text
+        raw = "<svg" + tail
 
-        # Strip XML declaration if present (<?xml ...?>)
-        if result.startswith("<?xml"):
-            result = result[result.find("<svg"):] if "<svg" in result else result
-
-        # Find the SVG element if buried in surrounding text
-        if not result.startswith("<svg") and "<svg" in result:
-            result = result[result.index("<svg"):]
-
-        if result.startswith("<svg") and "</svg>" in result:
+        # Extract from first <svg to last </svg>
+        start = raw.find("<svg")
+        end = raw.rfind("</svg>")
+        if start != -1 and end != -1:
+            result = raw[start: end + len("</svg>")]
             return result
-        logger.warning("SVG redraw did not return valid SVG")
+
+        logger.warning("SVG redraw did not return valid SVG. Raw (first 300 chars): %s", raw[:300])
         return None
 
     except Exception as exc:
@@ -428,6 +433,8 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                     # No valid bbox — fall back to full page
                     image_url = page_urls[page_idx]
 
+            q_type = q.get("question_type", "written")
+            options = q.get("options") if q_type == "mcq" else None
             rows.append({
                 "paper_id": paper_id,
                 "subject_id": subject_id,
@@ -439,7 +446,9 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 "has_image": has_image,
                 "image_url": image_url,
                 "topic_tags": q.get("topic_tags", []),
-                "question_type": q.get("question_type", "written"),
+                "question_type": q_type,
+                "mcq_options": options,
+                "_correct_option": q.get("correct_option"),  # temp field, stripped before insert
             })
 
         # Check paper still exists before inserting (it may have been deleted while extraction ran)
@@ -449,7 +458,26 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             return
 
         if rows:
-            supabase.table("question").insert(rows).execute()
+            # Strip the temporary _correct_option field before inserting
+            correct_options = {i: r.pop("_correct_option", None) for i, r in enumerate(rows)}
+            result = supabase.table("question").insert(rows).execute()
+
+            # Insert mcq_answer rows for questions that have a known correct option
+            inserted = result.data or []
+            mcq_answer_rows = []
+            for i, inserted_q in enumerate(inserted):
+                correct = correct_options.get(i)
+                if correct and correct in ("A", "B", "C", "D"):
+                    mcq_answer_rows.append({
+                        "question_id": inserted_q["id"],
+                        "correct_option": correct,
+                    })
+            if mcq_answer_rows:
+                supabase.table("mcq_answer").insert(mcq_answer_rows).execute()
+                logger.info(
+                    "Stored %d MCQ answer keys for paper %s",
+                    len(mcq_answer_rows), paper_id,
+                )
 
         # 6. Mark paper ready
         supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()

@@ -45,6 +45,41 @@ _FALLBACK_RESULT: dict[str, Any] = {
 }
 
 
+def _mcq_ai_feedback(
+    question: dict[str, Any],
+    given: str,
+    correct: str,
+    subject: dict[str, Any],
+) -> str | None:
+    """
+    Call Claude Haiku for a one-sentence MCQ explanation.
+    Returns the explanation string, or None on failure.
+    """
+    try:
+        client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        is_correct = given == correct
+        options_text = ""
+        if question.get("mcq_options"):
+            for opt in question["mcq_options"]:
+                options_text += f"\n  {opt['letter']}. {opt['text']}"
+        prompt = (
+            f"Subject: {subject.get('name', '')} ({subject.get('level', '')})\n"
+            f"Question: {question['text']}{options_text}\n"
+            f"Student answered: {given}. Correct answer: {correct}.\n"
+            f"In one concise sentence, explain why {correct} is correct"
+            + (f" and why {given} is wrong." if not is_correct else ".")
+        )
+        msg = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=150,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return msg.content[0].text.strip()
+    except Exception as exc:
+        logger.warning("MCQ AI feedback failed: %s", exc)
+        return None
+
+
 def _update_attempt(attempt_id: str, result: dict[str, Any], marks: int) -> None:
     supabase = get_supabase()
     score = min(int(result.get("score", 0)), marks)
@@ -86,8 +121,9 @@ def mark_attempt(attempt_id: str) -> None:
 
     result: dict[str, Any]
 
-    # ── MCQ path (zero Claude cost) ────────────────────────────────────────────
+    # ── MCQ path ───────────────────────────────────────────────────────────────
     if question_type == "mcq":
+        given = (student_answer or "").strip().upper()
         mcq_row = (
             supabase.table("mcq_answer")
             .select("correct_option")
@@ -97,24 +133,39 @@ def mark_attempt(attempt_id: str) -> None:
         )
         if mcq_row and mcq_row.data:
             correct = mcq_row.data["correct_option"]
-            given = (student_answer or "").strip().upper()
             is_correct = given == correct
+            # Brief AI explanation for MCQ
+            ai_explanation = _mcq_ai_feedback(question, given, correct, subject)
             result = {
                 "score": marks if is_correct else 0,
                 "feedback": {
-                    "correct_points": [f"Correct answer: {correct}"] if is_correct else [],
-                    "missing_points": [] if is_correct else [f"Correct answer was: {correct}"],
-                    "examiner_note": "Correct." if is_correct else f"Incorrect. The correct answer is {correct}.",
+                    "correct_points": [f"You selected {given} — correct!"] if is_correct else [],
+                    "missing_points": [] if is_correct else [f"You selected {given}. The correct answer is {correct}."],
+                    "examiner_note": ai_explanation or ("Correct." if is_correct else f"The correct answer is {correct}."),
+                },
+                "references": [],
+            }
+            _update_attempt(attempt_id, result, marks)
+            return
+        elif given in ("A", "B", "C", "D"):
+            # Answer key not stored yet — record answer but don't penalise
+            logger.warning(
+                "MCQ answer row missing for question %s — recording answer without scoring",
+                question["id"],
+            )
+            result = {
+                "score": 0,
+                "feedback": {
+                    "correct_points": [],
+                    "missing_points": [],
+                    "examiner_note": "Answer recorded. The answer key for this question is not yet available.",
                 },
                 "references": [],
             }
             _update_attempt(attempt_id, result, marks)
             return
         else:
-            logger.warning(
-                "MCQ answer row missing for question %s — falling back to written marking",
-                question["id"],
-            )
+            # Not a valid MCQ selection — fall through to written marking
             question_type = "written"
 
     # ── Empty / trivial answer gate ────────────────────────────────────────────
@@ -131,7 +182,7 @@ def mark_attempt(attempt_id: str) -> None:
         _update_attempt(attempt_id, result, marks)
         return
 
-    if len(student_answer.strip()) < 20:
+    if len(student_answer.strip()) < 3:
         result = {
             "score": 0,
             "feedback": {

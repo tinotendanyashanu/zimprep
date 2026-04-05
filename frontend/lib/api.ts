@@ -22,6 +22,8 @@ export type Paper = {
   status: string;
 };
 
+export type MCQOption = { letter: string; text: string };
+
 export type Question = {
   id: string;
   paper_id: string;
@@ -35,6 +37,7 @@ export type Question = {
   topic_tags: string[];
   question_type: "written" | "mcq";
   mcq_answer: string | null;
+  mcq_options: MCQOption[] | null;
 };
 
 export type Session = {

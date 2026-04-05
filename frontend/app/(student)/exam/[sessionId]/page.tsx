@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
   getSession, getQuestionsForPaper, autosaveSession, submitSession, submitAttempt,
-  type Session, type Question, type Attempt,
+  type Session, type Question, type Attempt, type MCQOption,
 } from "@/lib/api";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,35 @@ const OPTION_COLORS = {
 };
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+/**
+ * Extract MCQ option texts. Uses structured mcq_options if present,
+ * otherwise falls back to parsing A./B./C./D. lines from question text.
+ */
+function getMcqOptions(q: Question): MCQOption[] {
+  if (q.mcq_options && q.mcq_options.length > 0) return q.mcq_options;
+  // Fallback: parse "A  text", "B. text", "A) text" patterns from question text
+  const lines = q.text.split(/\n/);
+  const opts: MCQOption[] = [];
+  for (const line of lines) {
+    const m = line.match(/^\s*([A-D])[.\s\)]+(.+)/);
+    if (m) opts.push({ letter: m[1], text: m[2].trim() });
+  }
+  return opts.length >= 2 ? opts : MCQ_OPTIONS.map((l) => ({ letter: l, text: `Option ${l}` }));
+}
+
+/**
+ * Strip A/B/C/D option lines from a question's text so the stem renders cleanly.
+ */
+function getQuestionStem(q: Question): string {
+  if (q.question_type !== "mcq") return q.text;
+  if (q.mcq_options && q.mcq_options.length > 0) {
+    // Options are stored separately — text should already be stem-only
+    return q.text;
+  }
+  // Remove option lines from the text
+  return q.text.split(/\n/).filter((l) => !/^\s*[A-D][.\s\)]/.test(l)).join("\n").trim();
+}
 
 function formatTime(s: number) {
   const h = Math.floor(s / 3600);
@@ -97,7 +126,11 @@ function PracticeFeedback({ result, question, onNext, onRetry }: {
   const score = result.ai_score ?? 0;
   const pct = question.marks > 0 ? score / question.marks : 0;
   const isGood = pct >= 0.7;
-  const msg = pct >= 1 ? "Perfect! 🎉" : pct >= 0.7 ? "Well done! ✓" : pct >= 0.4 ? "Getting there 📖" : "Keep practising 💪";
+  const isMcq = question.question_type === "mcq";
+  const isCorrect = isMcq && score === question.marks;
+  const msg = isMcq
+    ? (isCorrect ? "Correct!" : "Incorrect")
+    : (pct >= 1 ? "Perfect!" : pct >= 0.7 ? "Well done! ✓" : pct >= 0.4 ? "Getting there 📖" : "Keep practising 💪");
 
   return (
     <motion.div 
@@ -384,6 +417,9 @@ export default function ExamSessionPage() {
 
   const currentQ = questions[currentIdx];
   const isExamMode = session?.mode === "exam";
+  // Papers with any MCQ questions use batch submit in both modes
+  const hasMcq = questions.some((q) => q.question_type === "mcq");
+  const isBatchMode = isExamMode || hasMcq;
   const answeredCount = questions.filter((q) => answers[q.id] || answerImages[q.id]).length;
   const progressPct = (answeredCount / questions.length) * 100;
   const unansweredCount = questions.length - answeredCount;
@@ -423,13 +459,13 @@ export default function ExamSessionPage() {
                 {formatTime(timeLeft)}
               </span>
             )}
-            {isExamMode && (
+            {isBatchMode && (
               <button
                 onClick={() => setShowConfirm(true)}
                 disabled={submitting}
                 className="px-4 py-1.5 bg-primary text-primary-foreground rounded-lg text-sm font-medium hover:opacity-90 disabled:opacity-50"
               >
-                {submitting ? "Submitting…" : "Submit"}
+                {submitting ? "Submitting…" : isExamMode ? "Submit" : "Finish & Submit"}
               </button>
             )}
           </div>
@@ -508,7 +544,7 @@ export default function ExamSessionPage() {
             </div>
 
             <div className="text-foreground text-base leading-relaxed">
-              <MathText text={currentQ.text} />
+              <MathText text={getQuestionStem(currentQ)} />
             </div>
           </div>
 
@@ -519,32 +555,32 @@ export default function ExamSessionPage() {
           {!practiceResults[currentQ.id] && (
             currentQ.question_type === "mcq" ? (
               <div className="grid grid-cols-1 gap-2.5">
-                {MCQ_OPTIONS.map((opt, idx) => {
-                  const colors = OPTION_COLORS[opt];
-                  const selected = answers[currentQ.id] === opt;
+                {getMcqOptions(currentQ).map((opt, idx) => {
+                  const colors = OPTION_COLORS[opt.letter as keyof typeof OPTION_COLORS] ?? OPTION_COLORS.A;
+                  const selected = answers[currentQ.id] === opt.letter;
                   return (
                     <button
-                      key={opt}
-                      onClick={() => handleAnswerChange(currentQ.id, opt)}
+                      key={opt.letter}
+                      onClick={() => handleAnswerChange(currentQ.id, opt.letter)}
                       className={cn(
                         "flex items-center gap-4 border-2 rounded-xl p-4 text-left transition-all duration-150 w-full",
                         selected ? colors.selected : cn(colors.base, "bg-white")
                       )}
                     >
                       <span className={cn(
-                        "shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold text-white",
-                        selected ? colors.badge : "bg-muted-foreground/30 text-foreground"
+                        "shrink-0 w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold",
+                        selected ? `${colors.badge} text-white` : "bg-muted-foreground/20 text-foreground"
                       )}>
-                        {opt}
+                        {opt.letter}
                       </span>
-                      <span className="text-sm font-medium text-foreground">
-                        Option {opt}
+                      <span className="text-sm font-medium text-foreground flex-1 min-w-0">
+                        <MathText text={opt.text} />
                         <span className="block text-xs text-muted-foreground font-normal mt-0.5">
                           Press {idx + 1}
                         </span>
                       </span>
                       {selected && (
-                        <span className="ml-auto text-primary font-bold">✓</span>
+                        <span className="ml-auto text-primary font-bold shrink-0">✓</span>
                       )}
                     </button>
                   );
@@ -591,8 +627,8 @@ export default function ExamSessionPage() {
             )
           )}
 
-          {/* Practice submit */}
-          {!isExamMode && !practiceResults[currentQ.id] && (
+          {/* Practice submit — written questions only; MCQ uses batch submit */}
+          {!isBatchMode && !practiceResults[currentQ.id] && currentQ.question_type !== "mcq" && (
             <Button
               onClick={handleSubmitPractice}
               disabled={practiceSubmitting || (!answers[currentQ.id]?.trim() && !answerImages[currentQ.id])}

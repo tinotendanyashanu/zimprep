@@ -5,12 +5,26 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   getResults, getSession, getQuestionsForPaper, flagAttempt,
-  type ResultsResponse, type Question,
+  type ResultsResponse, type Question, type MCQOption,
 } from "@/lib/api";
 import { MathText } from "@/components/math-text";
 import { cn } from "@/lib/utils";
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
+
+function getMcqOptionText(q: Question, letter: string): string {
+  const opts: MCQOption[] = q.mcq_options ?? [];
+  if (opts.length > 0) {
+    return opts.find((o) => o.letter === letter)?.text ?? letter;
+  }
+  // Fallback: parse from text
+  const lines = q.text.split(/\n/);
+  for (const line of lines) {
+    const m = line.match(new RegExp(`^\\s*${letter}[.\\s\\)]+(.+)`));
+    if (m) return m[1].trim();
+  }
+  return letter;
+}
 
 function getGrade(pct: number) {
   if (pct >= 80) return { letter: "A*", color: "text-green-600",  bg: "bg-green-50",  border: "border-green-200", msg: "Outstanding!" };
@@ -160,6 +174,8 @@ export default function ResultsPage() {
             const isFlagged = flagged[attempt.id] || attempt.flagged;
             const isOpen = expanded === attempt.id;
             const barColor = qPct >= 70 ? "bg-green-500" : qPct >= 40 ? "bg-amber-400" : "bg-red-400";
+            const q = questions.find((x) => x.id === attempt.question_id);
+            const isMcq = q?.question_type === "mcq";
 
             return (
               <div key={attempt.id} className="border border-border rounded-xl overflow-hidden bg-card">
@@ -197,7 +213,52 @@ export default function ResultsPage() {
 
                 {isOpen && (
                   <div className="px-4 pb-4 space-y-3 border-t border-border pt-3">
-                    {/* Student's answer */}
+                    {/* Question stem */}
+                    {q && (
+                      <div>
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Question</p>
+                        <p className="text-sm text-foreground leading-relaxed">
+                          <MathText text={
+                            isMcq && q.mcq_options?.length
+                              ? q.text
+                              : q.text.split(/\n/).filter((l) => !/^\s*[A-D][.\s\)]/.test(l)).join("\n").trim()
+                          } />
+                        </p>
+                      </div>
+                    )}
+
+                    {/* MCQ answer display */}
+                    {isMcq && q ? (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">Your Answer</p>
+                        {(q.mcq_options ?? []).filter(o => ["A","B","C","D"].includes(o.letter)).length > 0
+                          ? (q.mcq_options ?? []).map((opt) => {
+                              const isSelected = attempt.student_answer?.toUpperCase() === opt.letter;
+                              const isCorrectOpt = score === qMarks && isSelected;
+                              const isWrong = isSelected && score < qMarks;
+                              return (
+                                <div key={opt.letter} className={cn(
+                                  "flex items-center gap-2 text-sm px-3 py-2 rounded-lg border",
+                                  isCorrectOpt ? "border-green-400 bg-green-50 text-green-800 font-medium" :
+                                  isWrong ? "border-red-300 bg-red-50 text-red-800" :
+                                  "border-transparent text-muted-foreground"
+                                )}>
+                                  <span className="font-bold w-5 shrink-0">{opt.letter}.</span>
+                                  <MathText text={opt.text} />
+                                  {isCorrectOpt && <span className="ml-auto shrink-0">✓</span>}
+                                  {isWrong && <span className="ml-auto shrink-0">✗</span>}
+                                </div>
+                              );
+                            })
+                          : (
+                            <p className="text-sm bg-muted/40 rounded-lg px-3 py-2">
+                              {attempt.student_answer || <span className="italic text-muted-foreground">No answer</span>}
+                            </p>
+                          )
+                        }
+                      </div>
+                    ) : (
+                    /* Written answer display */
                     <div>
                       <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
                         Your answer
@@ -211,6 +272,7 @@ export default function ResultsPage() {
                         </p>
                       )}
                     </div>
+                    )}
 
                     {attempt.ai_feedback && (
                       <>
