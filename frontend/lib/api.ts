@@ -325,9 +325,10 @@ export const getPracticeSession = (studentId: string, subjectId: string) =>
     body: JSON.stringify({ student_id: studentId, subject_id: subjectId }),
   });
 
-export const getNextQuestion = (subjectId: string, studentId: string, topic?: string) => {
+export const getNextQuestion = (subjectId: string, studentId: string, topic?: string, paperNumber?: number) => {
   const params = new URLSearchParams({ subject_id: subjectId, student_id: studentId });
   if (topic) params.set("topic", topic);
+  if (paperNumber !== undefined) params.set("paper_number", String(paperNumber));
   return apiFetch<Question>(`/papers/questions/next?${params}`);
 };
 

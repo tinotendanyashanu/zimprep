@@ -24,6 +24,7 @@ def pick_next_question(
     subject_id: str,
     student_id: str,
     topic: str | None = None,
+    paper_number: int | None = None,
 ) -> dict[str, Any] | None:
     """
     Return the next question for a student using the adaptive algorithm.
@@ -61,14 +62,16 @@ def pick_next_question(
             if student_level and subject_row.data.get("level") != student_level:
                 return None
 
-    # 2. Get all ready papers for this subject
-    papers = (
+    # 2. Get all ready papers for this subject (optionally filtered by paper_number)
+    papers_query = (
         supabase.table("paper")
         .select("id")
         .eq("subject_id", subject_id)
         .eq("status", "ready")
-        .execute()
     )
+    if paper_number is not None:
+        papers_query = papers_query.eq("paper_number", paper_number)
+    papers = papers_query.execute()
     paper_ids = [p["id"] for p in papers.data]
     if not paper_ids:
         return None

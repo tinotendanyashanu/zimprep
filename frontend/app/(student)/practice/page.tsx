@@ -4,7 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import {
   getSubjects, getPracticeSession, getNextQuestion, getSubjectTopics,
-  getWeakTopics, submitAttempt, flagAttempt,
+  getWeakTopics, submitAttempt, flagAttempt, getPapersForSubject,
   type Subject, type Question, type PracticeAttemptResult, type WeakTopic,
 } from "@/lib/api";
 import { UpgradePrompt } from "@/components/UpgradePrompt";
@@ -152,8 +152,10 @@ export default function PracticePage() {
   const [subjects, setSubjects] = useState<Subject[]>([]);
   const [subjectsLoading, setSubjectsLoading] = useState(true);
 
-  const [stage, setStage] = useState<"selecting" | "practicing">("selecting");
+  const [stage, setStage] = useState<"selecting" | "paper-select" | "practicing">("selecting");
   const [selectedSubject, setSelectedSubject] = useState<Subject | null>(null);
+  const [availablePaperNumbers, setAvailablePaperNumbers] = useState<number[]>([]);
+  const [selectedPaperNumber, setSelectedPaperNumber] = useState<number | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [topics, setTopics] = useState<string[]>([]);
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
@@ -200,7 +202,7 @@ export default function PracticePage() {
     setFlagged(false);
     setError(null);
     try {
-      const q = await getNextQuestion(selectedSubject.id, studentId, topic ?? undefined);
+      const q = await getNextQuestion(selectedSubject.id, studentId, topic ?? undefined, selectedPaperNumber ?? undefined);
       setQuestion(q);
     } catch {
       setError("No more questions for this filter.");
@@ -208,24 +210,40 @@ export default function PracticePage() {
     } finally {
       setQuestionLoading(false);
     }
-  }, [selectedSubject, studentId]);
+  }, [selectedSubject, studentId, selectedPaperNumber]);
 
   async function selectSubject(subject: Subject) {
     if (!studentId) return;
     setError(null);
     setSelectedSubject(subject);
+    setAvailablePaperNumbers([]);
+    setSelectedPaperNumber(null);
+    try {
+      const papers = await getPapersForSubject(subject.id);
+      const nums = [...new Set(papers.map((p) => p.paper_number))].sort((a, b) => a - b);
+      setAvailablePaperNumbers(nums);
+      setStage("paper-select");
+    } catch {
+      setError("Failed to load papers.");
+    }
+  }
+
+  async function startPractice(paperNumber: number | null) {
+    if (!studentId || !selectedSubject) return;
+    setError(null);
+    setSelectedPaperNumber(paperNumber);
     setStage("practicing");
     setDoneCount(0); setCorrectTotal(0); setMaxTotal(0); setStreak(0); setXp(0);
     setActiveTopic(null);
     try {
       const [sessionRes, topicList] = await Promise.all([
-        getPracticeSession(studentId, subject.id),
-        getSubjectTopics(subject.id),
+        getPracticeSession(studentId, selectedSubject.id),
+        getSubjectTopics(selectedSubject.id),
       ]);
       setSessionId(sessionRes.session_id);
       setTopics(topicList);
       setQuestionLoading(true);
-      const q = await getNextQuestion(subject.id, studentId, undefined);
+      const q = await getNextQuestion(selectedSubject.id, studentId, undefined, paperNumber ?? undefined);
       setQuestion(q);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to start");
@@ -281,6 +299,65 @@ export default function PracticePage() {
   const upgradeOverlay = showUpgrade && upgradeDetail && (
     <UpgradePrompt detail={upgradeDetail} onDismiss={dismissUpgrade} />
   );
+
+  // ── Paper selection ──────────────────────────────────────────────────────────
+
+  if (stage === "paper-select" && selectedSubject) {
+    const PAPER_LABELS: Record<number, string> = {
+      1: "Paper 1 — Multiple Choice",
+      2: "Paper 2 — Structured / Theory",
+      3: "Paper 3 — Practical / Extended",
+      4: "Paper 4 — Advanced Theory",
+    };
+
+    return (
+      <div className="max-w-2xl mx-auto px-4 py-10 space-y-8">
+        {upgradeOverlay}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => { setStage("selecting"); setSelectedSubject(null); }}
+            className="text-muted-foreground hover:text-foreground transition text-sm"
+          >
+            ←
+          </button>
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">{selectedSubject.name}</h1>
+            <p className="text-muted-foreground text-sm mt-0.5">Choose a paper to practise</p>
+          </div>
+        </div>
+
+        {error && <p className="text-red-600 text-sm">{error}</p>}
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {availablePaperNumbers.map((num) => (
+            <button
+              key={num}
+              onClick={() => startPractice(num)}
+              className="text-left border border-border rounded-xl px-5 py-4 bg-card hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm transition-all group"
+            >
+              <p className="font-semibold text-foreground group-hover:text-primary transition-colors">
+                Paper {num}
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                {PAPER_LABELS[num] ?? `Paper ${num} questions`}
+              </p>
+            </button>
+          ))}
+          <button
+            onClick={() => startPractice(null)}
+            className="text-left border border-border rounded-xl px-5 py-4 bg-card hover:border-primary/40 hover:bg-primary/5 hover:shadow-sm transition-all group sm:col-span-2"
+          >
+            <p className="font-semibold text-foreground group-hover:text-primary transition-colors">
+              All Papers
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              Adaptive practice across all paper types
+            </p>
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── Subject selection ────────────────────────────────────────────────────────
 
@@ -354,14 +431,16 @@ export default function PracticePage() {
       {/* Header */}
       <div className="flex items-center gap-3 mb-5">
         <button
-          onClick={() => { setStage("selecting"); setSelectedSubject(null); setQuestion(null); setResult(null); }}
+          onClick={() => { setStage("paper-select"); setQuestion(null); setResult(null); setSessionId(null); }}
           className="text-muted-foreground hover:text-foreground transition text-sm"
         >
           ←
         </button>
         <div>
           <h1 className="font-bold text-foreground text-lg">{selectedSubject?.name}</h1>
-          <p className="text-xs text-muted-foreground">{selectedSubject?.level} Level</p>
+          <p className="text-xs text-muted-foreground">
+            {selectedPaperNumber ? `Paper ${selectedPaperNumber}` : "All Papers"} · {selectedSubject?.level} Level
+          </p>
         </div>
       </div>
 

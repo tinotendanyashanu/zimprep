@@ -103,9 +103,10 @@ def next_question(
     subject_id: str = Query(...),
     student_id: str = Query(...),
     topic: Optional[str] = Query(None),
+    paper_number: Optional[int] = Query(None),
 ) -> dict[str, Any]:
     """Return the next adaptively selected question for a student."""
-    question = pick_next_question(subject_id, student_id, topic)
+    question = pick_next_question(subject_id, student_id, topic, paper_number)
     if question is None:
         raise HTTPException(status_code=404, detail="No questions available")
     return question
