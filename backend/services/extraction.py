@@ -156,9 +156,17 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
         if "```" in result:
             for line in result.split("```"):
                 stripped = line.strip()
-                if stripped.startswith("<svg"):
+                if stripped.startswith("<svg") or "<svg" in stripped:
                     result = stripped
                     break
+
+        # Strip XML declaration if present (<?xml ...?>)
+        if result.startswith("<?xml"):
+            result = result[result.find("<svg"):] if "<svg" in result else result
+
+        # Find the SVG element if buried in surrounding text
+        if not result.startswith("<svg") and "<svg" in result:
+            result = result[result.index("<svg"):]
 
         if result.startswith("<svg") and "</svg>" in result:
             return result
@@ -369,6 +377,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 "topic_tags": q.get("topic_tags", []),
                 "question_type": q.get("question_type", "written"),
             })
+
+        # Check paper still exists before inserting (it may have been deleted while extraction ran)
+        paper_check = supabase.table("paper").select("id").eq("id", paper_id).execute()
+        if not paper_check.data:
+            logger.warning("Paper %s was deleted during extraction — discarding results", paper_id)
+            return
 
         if rows:
             supabase.table("question").insert(rows).execute()
