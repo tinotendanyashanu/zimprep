@@ -12,7 +12,7 @@ async function deletePaper(paperId: string): Promise<void> {
   }
 }
 
-type Subject = { id: string; name: string; level: string };
+type Subject = { id: string; name: string; level: string; exam_board?: string };
 type Paper = {
   id: string;
   subject_name: string;
@@ -23,8 +23,19 @@ type Paper = {
   created_at: string;
 };
 
-const LEVELS = ["Grade7", "O", "A"] as const;
-type Level = (typeof LEVELS)[number];
+type ExamBoard = "zimsec" | "cambridge";
+
+const ZIMSEC_LEVELS = ["Grade7", "O", "A"] as const;
+const CAMBRIDGE_LEVELS = ["IGCSE", "AS_Level", "A_Level"] as const;
+
+const LEVEL_LABELS: Record<string, string> = {
+  Grade7: "Grade 7",
+  O: "O Level",
+  A: "A Level",
+  IGCSE: "Cambridge IGCSE",
+  AS_Level: "Cambridge AS Level",
+  A_Level: "Cambridge A Level",
+};
 
 function StatusBadge({ status }: { status: string }) {
   const colors: Record<string, string> = {
@@ -53,10 +64,16 @@ export default function AdminPapersPage() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [examBoard, setExamBoard] = useState<ExamBoard>("zimsec");
   const [subjectMode, setSubjectMode] = useState<"existing" | "new">("existing");
   const [subjectId, setSubjectId] = useState("");
   const [newSubjectName, setNewSubjectName] = useState("");
-  const [newSubjectLevel, setNewSubjectLevel] = useState<Level>("O");
+  const [newSubjectLevel, setNewSubjectLevel] = useState("O");
+
+  const levels = examBoard === "cambridge" ? CAMBRIDGE_LEVELS : ZIMSEC_LEVELS;
+  const filteredSubjects = subjects.filter(
+    (s) => !s.exam_board || s.exam_board === examBoard
+  );
 
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [paperNumber, setPaperNumber] = useState("1");
@@ -85,7 +102,7 @@ export default function AdminPapersPage() {
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!supabaseUrl || !anonKey) return;
-    fetch(`${supabaseUrl}/rest/v1/subject?select=id,name,level&order=name`, {
+    fetch(`${supabaseUrl}/rest/v1/subject?select=id,name,level,exam_board&order=name`, {
       headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
     })
       .then((r) => r.json())
@@ -148,6 +165,7 @@ export default function AdminPapersPage() {
     } else {
       form.append("subject_name", newSubjectName.trim());
       form.append("level", newSubjectLevel);
+      form.append("exam_board", examBoard);
     }
     form.append("year", year);
     form.append("paper_number", paperNumber);
@@ -199,6 +217,27 @@ export default function AdminPapersPage() {
         {/* Upload form */}
         <form onSubmit={handleUpload} className="bg-card border border-border rounded-2xl p-6 space-y-5">
           <h2 className="text-base font-semibold text-foreground">Upload New Paper</h2>
+
+          {/* Exam board toggle */}
+          <div>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Exam Board</label>
+            <div className="inline-flex rounded-lg border border-border bg-muted/30 p-1 gap-1">
+              <button
+                type="button"
+                onClick={() => { setExamBoard("zimsec"); setSubjectId(""); setNewSubjectLevel("O"); }}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${examBoard === "zimsec" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                🇿🇼 ZIMSEC
+              </button>
+              <button
+                type="button"
+                onClick={() => { setExamBoard("cambridge"); setSubjectId(""); setNewSubjectLevel("IGCSE"); }}
+                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-all ${examBoard === "cambridge" ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                🎓 Cambridge
+              </button>
+            </div>
+          </div>
 
           {/* Drop zone */}
           <div
@@ -264,9 +303,9 @@ export default function AdminPapersPage() {
                 onChange={(e) => setSubjectId(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
-                <option value="">{subjects.length === 0 ? 'No subjects — click "+ New subject" above' : "Select subject…"}</option>
-                {subjects.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.level})</option>
+                <option value="">{filteredSubjects.length === 0 ? `No ${examBoard === "cambridge" ? "Cambridge" : "ZIMSEC"} subjects yet — create one` : "Select subject…"}</option>
+                {filteredSubjects.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name} ({LEVEL_LABELS[s.level] ?? s.level})</option>
                 ))}
               </select>
             ) : (
@@ -280,10 +319,10 @@ export default function AdminPapersPage() {
                 />
                 <select
                   value={newSubjectLevel}
-                  onChange={(e) => setNewSubjectLevel(e.target.value as Level)}
+                  onChange={(e) => setNewSubjectLevel(e.target.value)}
                   className="px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                 >
-                  {LEVELS.map((l) => <option key={l} value={l}>{l}</option>)}
+                  {levels.map((l) => <option key={l} value={l}>{LEVEL_LABELS[l]}</option>)}
                 </select>
               </div>
             )}
