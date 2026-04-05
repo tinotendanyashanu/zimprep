@@ -274,11 +274,29 @@ def delete_paper(paper_id: str) -> dict[str, Any]:
 @router.get("/stats")
 def get_admin_stats() -> dict[str, Any]:
     """High-level platform stats for the admin overview dashboard."""
+    import datetime
+
     supabase = get_supabase()
 
+    now = datetime.datetime.now(datetime.timezone.utc)
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
+    week_start = (now - datetime.timedelta(days=7)).isoformat()
+
+    # ── Core counts ──────────────────────────────────────────────────────────
     students_res = supabase.table("student").select("id", count="exact").execute()
     papers_res = supabase.table("paper").select("id", count="exact").execute()
     questions_res = supabase.table("question").select("id", count="exact").execute()
+    subjects_res = supabase.table("subject").select("id", count="exact").execute()
+
+    # ── Content pipeline ──────────────────────────────────────────────────────
+    processing_res = (
+        supabase.table("paper").select("id", count="exact").eq("status", "processing").execute()
+    )
+    error_res = (
+        supabase.table("paper").select("id", count="exact").eq("status", "error").execute()
+    )
+
+    # ── Moderation ───────────────────────────────────────────────────────────
     flagged_res = (
         supabase.table("attempt")
         .select("id", count="exact")
@@ -286,45 +304,141 @@ def get_admin_stats() -> dict[str, Any]:
         .eq("flag_resolved", False)
         .execute()
     )
-    active_subs_res = (
-        supabase.table("subscription")
-        .select("id", count="exact")
-        .eq("status", "active")
-        .execute()
-    )
-    processing_res = (
-        supabase.table("paper")
-        .select("id", count="exact")
-        .eq("status", "processing")
-        .execute()
-    )
-    error_res = (
-        supabase.table("paper")
-        .select("id", count="exact")
-        .eq("status", "error")
-        .execute()
-    )
 
-    # Revenue: sum amount_usd for active subscriptions
+    # ── Subscriptions & revenue ───────────────────────────────────────────────
+    active_subs_res = (
+        supabase.table("subscription").select("id", count="exact").eq("status", "active").execute()
+    )
     revenue_res = (
-        supabase.table("subscription")
-        .select("amount_usd")
-        .eq("status", "active")
-        .execute()
+        supabase.table("subscription").select("amount_usd").eq("status", "active").execute()
     )
     monthly_revenue = sum(
         float(row.get("amount_usd") or 0) for row in (revenue_res.data or [])
     )
 
+    # Paid students (standard / bundle / all_subjects tier)
+    paid_students_res = (
+        supabase.table("student")
+        .select("id", count="exact")
+        .in_("subscription_tier", ["standard", "bundle", "all_subjects"])
+        .execute()
+    )
+    paid_count = paid_students_res.count or 0
+    total_students = students_res.count or 0
+    conversion_rate = round((paid_count / total_students * 100) if total_students else 0, 1)
+
+    # New students this week
+    new_students_res = (
+        supabase.table("student")
+        .select("id", count="exact")
+        .gte("created_at", week_start)
+        .execute()
+    )
+
+    # ── Session engagement ────────────────────────────────────────────────────
+    sessions_today_res = (
+        supabase.table("session")
+        .select("id", count="exact")
+        .gte("started_at", today_start)
+        .execute()
+    )
+    sessions_week_res = (
+        supabase.table("session")
+        .select("id", count="exact")
+        .gte("started_at", week_start)
+        .execute()
+    )
+    completed_sessions_res = (
+        supabase.table("session")
+        .select("id", count="exact")
+        .not_.is_("completed_at", "null")
+        .execute()
+    )
+
+    # ── AI marking ───────────────────────────────────────────────────────────
+    total_attempts_res = supabase.table("attempt").select("id", count="exact").execute()
+    marked_attempts_res = (
+        supabase.table("attempt")
+        .select("id", count="exact")
+        .not_.is_("ai_score", "null")
+        .execute()
+    )
+    # Average AI score (sample up to 500 rows, compute in Python)
+    score_sample = (
+        supabase.table("attempt")
+        .select("ai_score")
+        .not_.is_("ai_score", "null")
+        .limit(500)
+        .execute()
+    )
+    scores = [row["ai_score"] for row in (score_sample.data or []) if row.get("ai_score") is not None]
+    avg_ai_score = round(sum(scores) / len(scores), 1) if scores else None
+
+    total_attempts = total_attempts_res.count or 0
+    marked_attempts = marked_attempts_res.count or 0
+    mark_rate = round((marked_attempts / total_attempts * 100) if total_attempts else 0, 1)
+
+    # ── Top subjects by question count ───────────────────────────────────────
+    top_subjects_res = (
+        supabase.table("subject")
+        .select("name, level, exam_board, question(id)")
+        .limit(20)
+        .execute()
+    )
+    top_subjects = sorted(
+        [
+            {
+                "name": row["name"],
+                "level": row.get("level", ""),
+                "exam_board": row.get("exam_board", ""),
+                "question_count": len(row.get("question") or []),
+            }
+            for row in (top_subjects_res.data or [])
+        ],
+        key=lambda x: x["question_count"],
+        reverse=True,
+    )[:5]
+
+    # ── Tier distribution ─────────────────────────────────────────────────────
+    tier_dist_res = (
+        supabase.table("student")
+        .select("subscription_tier")
+        .execute()
+    )
+    tier_dist: dict[str, int] = {}
+    for row in (tier_dist_res.data or []):
+        t = row.get("subscription_tier") or "starter"
+        tier_dist[t] = tier_dist.get(t, 0) + 1
+
     return {
-        "students": students_res.count or 0,
+        # Core
+        "students": total_students,
         "papers": papers_res.count or 0,
         "questions": questions_res.count or 0,
-        "flagged_attempts": flagged_res.count or 0,
-        "active_subscriptions": active_subs_res.count or 0,
+        "subjects": subjects_res.count or 0,
+        # Pipeline
         "papers_processing": processing_res.count or 0,
         "papers_error": error_res.count or 0,
+        # Moderation
+        "flagged_attempts": flagged_res.count or 0,
+        # Revenue
+        "active_subscriptions": active_subs_res.count or 0,
         "monthly_revenue_usd": round(monthly_revenue, 2),
+        "paid_students": paid_count,
+        "conversion_rate": conversion_rate,
+        "new_students_this_week": new_students_res.count or 0,
+        # Engagement
+        "sessions_today": sessions_today_res.count or 0,
+        "sessions_this_week": sessions_week_res.count or 0,
+        "completed_sessions": completed_sessions_res.count or 0,
+        # AI Marking
+        "total_attempts": total_attempts,
+        "marked_attempts": marked_attempts,
+        "avg_ai_score": avg_ai_score,
+        "mark_rate": mark_rate,
+        # Content
+        "top_subjects": top_subjects,
+        "tier_distribution": tier_dist,
     }
 
 
