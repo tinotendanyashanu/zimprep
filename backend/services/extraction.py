@@ -180,7 +180,7 @@ def _redraw_as_svg(image_bytes: bytes) -> str | None:
 
         response = _gemini_call_with_retry(
             client.models.generate_content,
-            model="gemini-2.0-flash",
+            model="gemini-2.0-flash-001",
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                 SVG_REDRAW_PROMPT,
@@ -335,7 +335,7 @@ def _call_gemini_for_pages(
 
     response = _gemini_call_with_retry(
         client.models.generate_content,
-        model="gemini-2.0-flash",
+        model="gemini-2.0-flash-001",
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
