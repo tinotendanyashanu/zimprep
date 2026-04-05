@@ -122,8 +122,8 @@ export const TIER_CONFIG: Record<Tier, TierConfig> = {
 
 export const PAID_TIERS: Tier[] = ["standard", "bundle", "all_subjects"];
 
-export function isPaid(tier: Tier): boolean {
-  return PAID_TIERS.includes(tier);
+export function isPaid(_tier: Tier): boolean {
+  return true;
 }
 
 // ── Custom error class ─────────────────────────────────────────────────────────

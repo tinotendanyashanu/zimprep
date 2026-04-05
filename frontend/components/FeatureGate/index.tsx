@@ -46,18 +46,7 @@ function DefaultFallback({ feature }: { feature: FeatureGateProps["required"] })
   );
 }
 
-export function FeatureGate({ tier, required, children, fallback }: FeatureGateProps) {
-  const allowed =
-    tier !== null &&
-    (required === "paid"
-      ? isPaid(tier)
-      : required === "handwriting" || required === "exam"
-      ? isPaid(tier)
-      : false);
-
-  if (!allowed) {
-    return <>{fallback ?? <DefaultFallback feature={required} />}</>;
-  }
+export function FeatureGate({ children }: FeatureGateProps) {
   return <>{children}</>;
 }
 
@@ -68,31 +57,6 @@ type ExamModeGateProps = {
   children: React.ReactNode;
 };
 
-export function ExamModeGate({ tier, children }: ExamModeGateProps) {
-  if (tier !== null && isPaid(tier)) {
-    return <>{children}</>;
-  }
-
-  return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center px-6 text-center">
-      <span className="mb-4 text-5xl">📋</span>
-      <h2 className="mb-2 text-2xl font-bold">Exam Mode</h2>
-      <p className="mb-6 max-w-sm text-gray-500">
-        Sit full past papers under timed conditions and get comprehensive AI
-        marking. Available on all paid plans.
-      </p>
-      <Link
-        href="/subscription/pricing"
-        className="rounded-xl bg-gray-900 px-8 py-3 font-semibold text-white hover:bg-gray-700"
-      >
-        Unlock Exam Mode
-      </Link>
-      <Link
-        href="/practice"
-        className="mt-3 text-sm text-gray-400 hover:text-gray-600 hover:underline"
-      >
-        Continue with free practice →
-      </Link>
-    </div>
-  );
+export function ExamModeGate({ children }: ExamModeGateProps) {
+  return <>{children}</>;
 }

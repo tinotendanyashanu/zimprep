@@ -61,78 +61,15 @@ def _count_submissions_today(student_id: str) -> int:
 # ── Public API ─────────────────────────────────────────────────────────────────
 
 def check_practice_quota(session_id: str, question_type: str = "written") -> QuotaStatus:
-    """
-    Check whether a student can submit another practice answer.
-
-    - MCQ questions are always allowed (cost zero AI calls).
-    - Starter tier: max DAILY_FREE_LIMIT written submissions per day.
-    - Paid tiers: unlimited.
-    """
-    # MCQ never counts against quota
-    if question_type == "mcq":
-        return QuotaStatus(
-            tier="starter",
-            allowed=True,
-            used=0,
-            limit=None,
-            feature="practice",
-        )
-
-    student_id = _get_student_id_from_session(session_id)
-    if not student_id:
-        # Can't find session — let the route handler deal with it
-        return QuotaStatus(tier="starter", allowed=True, used=0, limit=None, feature="practice")
-
-    tier = _get_student_tier(student_id)
-
-    if tier in PAID_TIERS:
-        return QuotaStatus(tier=tier, allowed=True, used=0, limit=None, feature="practice")
-
-    # Starter tier: count today's submissions
-    used = _count_submissions_today(student_id)
-    limit = tier_daily_limit(tier) or DAILY_FREE_LIMIT
-    allowed = used < limit
-
-    return QuotaStatus(
-        tier=tier,
-        allowed=allowed,
-        used=used,
-        limit=limit,
-        feature="practice",
-    )
+    """Quota checks disabled — all students have unlimited access."""
+    return QuotaStatus(tier="all_subjects", allowed=True, used=0, limit=None, feature="practice")
 
 
 def check_exam_quota(student_id: str) -> QuotaStatus:
-    """
-    Check whether a student can start an exam session.
-    Starter tier does not have exam mode access.
-    """
-    tier = _get_student_tier(student_id)
-    allowed = tier_allows_exam(tier)
-    return QuotaStatus(
-        tier=tier,
-        allowed=allowed,
-        used=0,
-        limit=None,
-        feature="exam",
-    )
+    """Quota checks disabled — all students have exam mode access."""
+    return QuotaStatus(tier="all_subjects", allowed=True, used=0, limit=None, feature="exam")
 
 
 def get_quota_status(student_id: str) -> QuotaStatus:
-    """
-    Return the current quota status for the dashboard / QuotaBar.
-    Shows daily usage for starter tier; unlimited for paid tiers.
-    """
-    tier = _get_student_tier(student_id)
-    if tier in PAID_TIERS:
-        return QuotaStatus(tier=tier, allowed=True, used=0, limit=None, feature="practice")
-
-    used = _count_submissions_today(student_id)
-    limit = DAILY_FREE_LIMIT
-    return QuotaStatus(
-        tier=tier,
-        allowed=used < limit,
-        used=used,
-        limit=limit,
-        feature="practice",
-    )
+    """Quota checks disabled — all students have unlimited access."""
+    return QuotaStatus(tier="all_subjects", allowed=True, used=0, limit=None, feature="practice")

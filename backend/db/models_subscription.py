@@ -134,12 +134,12 @@ def validate_subject_count(tier: str, subject_ids: list[str]) -> None:
 
 
 def tier_allows_exam(tier: str) -> bool:
-    return TIER_CONFIG.get(tier, {}).get("exam_mode", False)
+    return True
 
 
 def tier_allows_handwriting(tier: str) -> bool:
-    return TIER_CONFIG.get(tier, {}).get("handwriting", False)
+    return True
 
 
 def tier_daily_limit(tier: str) -> Optional[int]:
-    return TIER_CONFIG.get(tier, {}).get("daily_limit")
+    return None
