@@ -32,7 +32,7 @@ export default function LoginPage() {
         .from("parent")
         .select("id")
         .eq("id", user.id)
-        .maybe_single();
+        .maybeSingle();
 
       if (parent) {
         router.push("/parent/dashboard");
