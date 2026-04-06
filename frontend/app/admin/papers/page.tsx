@@ -18,6 +18,7 @@ type Paper = {
   subject_name: string;
   year: number;
   paper_number: number;
+  exam_session: "june" | "november" | null;
   duration_minutes: number;
   status: string;
   created_at: string;
@@ -77,6 +78,7 @@ export default function AdminPapersPage() {
 
   const [year, setYear] = useState(String(new Date().getFullYear()));
   const [paperNumber, setPaperNumber] = useState("1");
+  const [examSession, setExamSession] = useState<"june" | "november">("november");
   const [durationMinutes, setDurationMinutes] = useState("120");
 
   const [file, setFile] = useState<File | null>(null);
@@ -169,6 +171,7 @@ export default function AdminPapersPage() {
     }
     form.append("year", year);
     form.append("paper_number", paperNumber);
+    form.append("exam_session", examSession);
     form.append("duration_minutes", durationMinutes);
     form.append("file", file);
 
@@ -328,8 +331,8 @@ export default function AdminPapersPage() {
             )}
           </div>
 
-          {/* Year / Paper / Duration */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {/* Year / Session / Paper / Duration */}
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">Year</label>
               <input
@@ -341,6 +344,21 @@ export default function AdminPapersPage() {
                 onChange={(e) => setYear(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-foreground mb-1.5">Session</label>
+              <div className="inline-flex w-full rounded-lg border border-border bg-muted/30 p-1 gap-1">
+                {(["june", "november"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => setExamSession(s)}
+                    className={`flex-1 py-1.5 rounded-md text-sm font-medium transition-all capitalize ${examSession === s ? "bg-white shadow text-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                  >
+                    {s === "june" ? "June" : "Nov"}
+                  </button>
+                ))}
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-foreground mb-1.5">Paper Number</label>
@@ -413,6 +431,7 @@ export default function AdminPapersPage() {
                   <tr className="text-left text-muted-foreground border-b border-border">
                     <th className="pb-3 pr-4 font-medium">Subject</th>
                     <th className="pb-3 pr-4 font-medium">Year</th>
+                    <th className="pb-3 pr-4 font-medium">Session</th>
                     <th className="pb-3 pr-4 font-medium">Paper</th>
                     <th className="pb-3 pr-4 font-medium">Duration</th>
                     <th className="pb-3 pr-4 font-medium">Status</th>
@@ -424,6 +443,7 @@ export default function AdminPapersPage() {
                     <tr key={p.id} className="align-middle">
                       <td className="py-3 pr-4 font-medium text-foreground">{p.subject_name}</td>
                       <td className="py-3 pr-4 text-foreground">{p.year}</td>
+                      <td className="py-3 pr-4 text-foreground capitalize">{p.exam_session ?? "—"}</td>
                       <td className="py-3 pr-4 text-foreground">{p.paper_number}</td>
                       <td className="py-3 pr-4 text-muted-foreground">
                         {p.duration_minutes ? formatDuration(p.duration_minutes) : "—"}

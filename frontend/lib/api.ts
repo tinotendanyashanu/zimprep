@@ -19,6 +19,7 @@ export type Paper = {
   id: string;
   year: number;
   paper_number: number;
+  exam_session: "june" | "november" | null;
   status: string;
 };
 
@@ -52,6 +53,7 @@ export type Session = {
     id: string;
     year: number;
     paper_number: number;
+    exam_session: "june" | "november" | null;
     duration_minutes: number;
     subject: { id: string; name: string; level: string };
   };

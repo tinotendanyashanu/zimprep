@@ -210,7 +210,13 @@ export default function ExamSelectPage() {
                   <Card className="hover:border-primary transition-colors cursor-pointer">
                     <CardContent className="flex items-center justify-between py-3 px-5">
                       <span className="font-medium text-foreground">
-                        {p.year} — Paper {p.paper_number}
+                        {p.year}
+                        {p.exam_session && (
+                          <span className="ml-1 text-muted-foreground font-normal capitalize">
+                            ({p.exam_session})
+                          </span>
+                        )}
+                        {" — "}Paper {p.paper_number}
                       </span>
                       <span className="text-sm text-muted-foreground">→</span>
                     </CardContent>
@@ -239,7 +245,11 @@ export default function ExamSelectPage() {
             <CardContent className="py-4 px-5 space-y-1">
               <p className="font-medium text-foreground">{selectedSubject.name}</p>
               <p className="text-sm text-muted-foreground">
-                {selectedPaper.year} — Paper {selectedPaper.paper_number}
+                {selectedPaper.year}
+                {selectedPaper.exam_session && (
+                  <span className="capitalize"> ({selectedPaper.exam_session})</span>
+                )}
+                {" — "}Paper {selectedPaper.paper_number}
               </p>
             </CardContent>
           </Card>

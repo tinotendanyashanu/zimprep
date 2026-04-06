@@ -50,10 +50,11 @@ def list_papers_for_subject(subject_id: str) -> list[dict[str, Any]]:
     supabase = get_supabase()
     result = (
         supabase.table("paper")
-        .select("id, year, paper_number, status")
+        .select("id, year, paper_number, exam_session, status")
         .eq("subject_id", subject_id)
         .eq("status", "ready")
         .order("year", desc=True)
+        .order("exam_session", desc=True)
         .execute()
     )
     return result.data

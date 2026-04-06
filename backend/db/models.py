@@ -18,6 +18,7 @@ class Paper(BaseModel):
     subject_id: str
     year: int
     paper_number: int
+    exam_session: Optional[str] = None  # 'june' | 'november'
     pdf_url: str
     status: str  # 'processing' | 'ready' | 'error'
     created_at: datetime

@@ -31,6 +31,7 @@ class PaperSummary(BaseModel):
     subject_name: str
     year: int
     paper_number: int
+    exam_session: Optional[str]
     pdf_url: str
     status: str
 
@@ -68,6 +69,7 @@ async def upload_paper(
     exam_board: Optional[str] = Form("zimsec"),
     year: int = Form(...),
     paper_number: int = Form(...),
+    exam_session: Optional[str] = Form(None),
     duration_minutes: int = Form(120),
     file: UploadFile = File(...),
 ) -> dict[str, Any]:
@@ -92,6 +94,9 @@ async def upload_paper(
 
         if exam_board not in ("zimsec", "cambridge"):
             raise HTTPException(status_code=422, detail="exam_board must be 'zimsec' or 'cambridge'")
+
+    if exam_session is not None and exam_session not in ("june", "november"):
+        raise HTTPException(status_code=422, detail="exam_session must be 'june' or 'november'")
 
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted")
@@ -152,6 +157,7 @@ async def upload_paper(
                 "subject_id": subject_id,
                 "year": year,
                 "paper_number": paper_number,
+                "exam_session": exam_session,
                 "duration_minutes": duration_minutes,
                 "pdf_url": pdf_url,
                 "status": "processing",
@@ -175,7 +181,7 @@ def list_papers() -> list[dict[str, Any]]:
     supabase = get_supabase()
     result = (
         supabase.table("paper")
-        .select("id, year, paper_number, duration_minutes, pdf_url, status, created_at, subject(name)")
+        .select("id, year, paper_number, exam_session, duration_minutes, pdf_url, status, created_at, subject(name)")
         .order("created_at", desc=True)
         .execute()
     )
@@ -188,6 +194,7 @@ def list_papers() -> list[dict[str, Any]]:
                 "subject_name": subject_name,
                 "year": row["year"],
                 "paper_number": row["paper_number"],
+                "exam_session": row.get("exam_session"),
                 "duration_minutes": row.get("duration_minutes", 120),
                 "pdf_url": row["pdf_url"],
                 "status": row["status"],

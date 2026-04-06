@@ -445,7 +445,11 @@ export default function ExamSessionPage() {
               {session?.paper?.subject?.name}
             </p>
             <p className="text-xs text-muted-foreground">
-              {session?.paper?.year} · Paper {session?.paper?.paper_number} · {answeredCount}/{questions.length} answered
+              {session?.paper?.year}
+              {session?.paper?.exam_session && (
+                <span className="capitalize"> ({session.paper.exam_session})</span>
+              )}
+              {" · "}Paper {session?.paper?.paper_number} · {answeredCount}/{questions.length} answered
             </p>
           </div>
 
