@@ -8,6 +8,7 @@ const REASON_LABELS: Record<string, { label: string; color: string }> = {
   marks_missing:  { label: "Marks missing",    color: "bg-orange-50 text-orange-700 border-orange-200" },
   text_too_short: { label: "Text too short",   color: "bg-red-50 text-red-700 border-red-200" },
   diagram_no_bbox:{ label: "Diagram no bbox",  color: "bg-amber-50 text-amber-700 border-amber-200" },
+  student_flag:   { label: "Student reported", color: "bg-purple-50 text-purple-700 border-purple-200" },
 };
 
 type ReviewQuestion = {

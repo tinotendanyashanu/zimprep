@@ -18,10 +18,12 @@ type FlaggedAttempt = {
   ai_feedback: AiFeedback;
   marked_at: string | null;
   flagged: boolean;
+  flag_reason: "question_issue" | "marking_issue" | null;
   flag_resolved: boolean;
   created_at: string;
   session: { student_id: string; paper_id: string; mode: string } | null;
   question: {
+    id: string;
     text: string;
     marks: number;
     question_number: string;
@@ -155,7 +157,17 @@ export default function AdminFlaggedPage() {
                         <p className="text-sm font-medium text-foreground line-clamp-2">
                           {q ? `Q${q.question_number}: ${q.text.slice(0, 120)}${q.text.length > 120 ? "…" : ""}` : "Question not found"}
                         </p>
-                        <div className="flex items-center gap-2 mt-1.5">
+                        <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+                          {a.flag_reason === "question_issue" && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200 font-medium">
+                              Question issue
+                            </span>
+                          )}
+                          {a.flag_reason === "marking_issue" && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-full border bg-orange-50 text-orange-700 border-orange-200 font-medium">
+                              Marking dispute
+                            </span>
+                          )}
                           {q?.topic_tags?.map((tag) => (
                             <span key={tag} className="text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground">
                               {tag}

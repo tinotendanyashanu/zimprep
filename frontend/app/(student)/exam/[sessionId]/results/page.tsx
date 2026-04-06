@@ -74,7 +74,9 @@ export default function ResultsPage() {
   const [results, setResults] = useState<ResultsResponse | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [flagged, setFlagged] = useState<Record<string, boolean>>({});
+  const [flagged, setFlagged] = useState<Record<string, { reason: string }>>({});
+  const [flagPicking, setFlagPicking] = useState<string | null>(null); // attemptId choosing reason
+  const [flagging, setFlagging] = useState<string | null>(null); // attemptId submitting
   const [expanded, setExpanded] = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -104,9 +106,14 @@ export default function ResultsPage() {
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, [sessionId]);
 
-  async function handleFlag(attemptId: string) {
-    try { await flagAttempt(attemptId); setFlagged((p) => ({ ...p, [attemptId]: true })); }
-    catch {}
+  async function handleFlag(attemptId: string, reason: "question_issue" | "marking_issue") {
+    setFlagging(attemptId);
+    try {
+      await flagAttempt(attemptId, reason);
+      setFlagged((p) => ({ ...p, [attemptId]: { reason } }));
+      setFlagPicking(null);
+    } catch {}
+    finally { setFlagging(null); }
   }
 
   const questionMarks: Record<string, number> = {};
@@ -171,7 +178,8 @@ export default function ResultsPage() {
             const qMarks = questionMarks[attempt.question_id] ?? 1;
             const score = attempt.ai_score ?? 0;
             const qPct = (score / qMarks) * 100;
-            const isFlagged = flagged[attempt.id] || attempt.flagged;
+            const flagState = flagged[attempt.id];
+            const isFlagged = !!flagState || attempt.flagged;
             const isOpen = expanded === attempt.id;
             const barColor = qPct >= 70 ? "bg-green-500" : qPct >= 40 ? "bg-amber-400" : "bg-red-400";
             const q = questions.find((x) => x.id === attempt.question_id);
@@ -196,7 +204,7 @@ export default function ResultsPage() {
                       <div className="flex items-center gap-2">
                         {isFlagged && (
                           <span className="text-xs px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">
-                            Flagged
+                            {flagState?.reason === "question_issue" ? "Question reported" : "Marking disputed"}
                           </span>
                         )}
                         <span className="text-sm font-semibold text-foreground">
@@ -315,13 +323,47 @@ export default function ResultsPage() {
                       </div>
                     )}
 
-                    {!isFlagged && (
+                    {!isFlagged && flagPicking !== attempt.id && (
                       <button
-                        onClick={() => handleFlag(attempt.id)}
+                        onClick={() => setFlagPicking(attempt.id)}
                         className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 transition hover:bg-muted"
                       >
-                        Flag this marking
+                        Report an issue
                       </button>
+                    )}
+
+                    {!isFlagged && flagPicking === attempt.id && (
+                      <div className="border border-border rounded-xl p-3 space-y-2 bg-muted/30">
+                        <p className="text-xs font-medium text-foreground">What is the issue?</p>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <button
+                            disabled={!!flagging}
+                            onClick={() => handleFlag(attempt.id, "question_issue")}
+                            className="text-left px-3 py-2.5 rounded-lg border border-border bg-background hover:border-red-400 hover:bg-red-50 transition disabled:opacity-50"
+                          >
+                            <p className="text-xs font-medium text-foreground">Issue with the question</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              Question text, image, or options are wrong or unclear
+                            </p>
+                          </button>
+                          <button
+                            disabled={!!flagging}
+                            onClick={() => handleFlag(attempt.id, "marking_issue")}
+                            className="text-left px-3 py-2.5 rounded-lg border border-border bg-background hover:border-orange-400 hover:bg-orange-50 transition disabled:opacity-50"
+                          >
+                            <p className="text-xs font-medium text-foreground">Issue with the marking</p>
+                            <p className="text-[11px] text-muted-foreground mt-0.5">
+                              My answer was correct but AI marked it wrong
+                            </p>
+                          </button>
+                        </div>
+                        <button
+                          onClick={() => setFlagPicking(null)}
+                          className="text-[11px] text-muted-foreground hover:text-foreground transition"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}

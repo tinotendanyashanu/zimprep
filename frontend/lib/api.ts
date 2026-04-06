@@ -315,9 +315,14 @@ export const submitAttempt = (
     }),
   });
 
-export const flagAttempt = (attemptId: string) =>
-  apiFetch<{ flagged: boolean }>(`/attempts/${attemptId}/flag`, {
+export const flagAttempt = (
+  attemptId: string,
+  reason: "question_issue" | "marking_issue",
+) =>
+  apiFetch<{ flagged: boolean; reason: string }>(`/attempts/${attemptId}/flag`, {
     method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ reason }),
   });
 
 export const getPracticeSession = (studentId: string, subjectId: string) =>

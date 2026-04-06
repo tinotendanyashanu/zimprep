@@ -524,9 +524,9 @@ def list_flagged_attempts(limit: int = 50, offset: int = 0) -> dict[str, Any]:
     result = (
         supabase.table("attempt")
         .select(
-            "id, student_answer, answer_image_url, ai_score, ai_feedback, marked_at, flagged, flag_resolved, created_at, "
+            "id, student_answer, answer_image_url, ai_score, ai_feedback, marked_at, flagged, flag_reason, flag_resolved, created_at, "
             "session(student_id, paper_id, mode), "
-            "question(text, marks, question_number, topic_tags)",
+            "question(id, text, marks, question_number, topic_tags)",
             count="exact",
         )
         .eq("flagged", True)

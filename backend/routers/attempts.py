@@ -136,13 +136,48 @@ def get_attempt(attempt_id: str) -> dict[str, Any]:
     return result.data
 
 
+class FlagAttemptRequest(BaseModel):
+    reason: str  # 'question_issue' | 'marking_issue'
+
+
 @router.patch("/{attempt_id}/flag")
-def flag_attempt(attempt_id: str) -> dict[str, Any]:
-    """Flag an attempt for review of incorrect marking."""
+def flag_attempt(attempt_id: str, body: FlagAttemptRequest) -> dict[str, Any]:
+    """
+    Flag an attempt with a reason.
+
+    - 'marking_issue'  — student believes AI marked their answer wrong.
+    - 'question_issue' — student reports the question itself is wrong/unclear.
+                         The question is immediately hidden from all students
+                         and queued for admin review.
+    """
+    if body.reason not in ("question_issue", "marking_issue"):
+        raise HTTPException(status_code=422, detail="reason must be 'question_issue' or 'marking_issue'")
+
     supabase = get_supabase()
-    result = supabase.table("attempt").select("id").eq("id", attempt_id).maybe_single().execute()
-    if not result or not result.data:
+
+    attempt = (
+        supabase.table("attempt")
+        .select("id, question_id")
+        .eq("id", attempt_id)
+        .maybe_single()
+        .execute()
+    )
+    if not attempt or not attempt.data:
         raise HTTPException(status_code=404, detail="Attempt not found")
 
-    supabase.table("attempt").update({"flagged": True}).eq("id", attempt_id).execute()
-    return {"flagged": True}
+    supabase.table("attempt").update({
+        "flagged": True,
+        "flag_reason": body.reason,
+    }).eq("id", attempt_id).execute()
+
+    # For question issues: hide the question from all students immediately
+    # and send it to the admin review queue.
+    if body.reason == "question_issue":
+        question_id = attempt.data["question_id"]
+        supabase.table("question").update({
+            "hidden": True,
+            "needs_review": True,
+            "review_reasons": ["student_flag"],
+        }).eq("id", question_id).execute()
+
+    return {"flagged": True, "reason": body.reason}
