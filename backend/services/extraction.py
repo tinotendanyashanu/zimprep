@@ -2,9 +2,9 @@
 PDF Extraction Pipeline
 
 Renders each PDF page as a JPEG image (using PyMuPDF) and sends them to
-Google Gemini 2.0 Flash for structured question extraction. 2.0 Flash matches
-2.5 Flash quality for deterministic JSON extraction at ~5× lower cost — budget
-is better spent on Gemini 2.5 Flash (with thinking) in the marking pipeline.
+Google Gemini 2.5 Flash (thinking disabled) for structured question extraction.
+Thinking is disabled because extraction is deterministic structured output —
+thinking_budget=0 cuts cost by ~90% vs default since no thinking tokens are billed.
 
 Math notation:
   Inline: \\( ... \\)   e.g. \\(x^2 + 2x + 1\\)
@@ -296,13 +296,14 @@ def _call_gemini_for_pages(
 
     response = _gemini_call_with_retry(
         client.models.generate_content,
-        # gemini-2.0-flash: same quality as 2.5-flash for structured JSON extraction
-        # at ~5× lower cost. Thinking not available on 2.0-flash.
-        model="gemini-2.0-flash",
+        model="gemini-2.5-flash",
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
             max_output_tokens=16384,
+            # Thinking disabled — extraction is deterministic structured output.
+            # thinking_budget=0 cuts cost by ~90% vs default (no thinking tokens billed).
+            thinking_config=types.ThinkingConfig(thinking_budget=0),
         ),
     )
 
