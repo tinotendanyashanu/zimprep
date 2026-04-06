@@ -18,7 +18,7 @@ export default function LoginPage() {
     setLoading(true);
 
     const supabase = createClient();
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    const { data: authData, error } = await supabase.auth.signInWithPassword({ email, password });
 
     if (error) {
       setError(error.message);
@@ -26,7 +26,22 @@ export default function LoginPage() {
       return;
     }
 
-    router.push("/dashboard");
+    const user = authData.user;
+    if (user) {
+      const { data: parent } = await supabase
+        .from("parent")
+        .select("id")
+        .eq("id", user.id)
+        .maybe_single();
+
+      if (parent) {
+        router.push("/parent/dashboard");
+      } else {
+        router.push("/dashboard");
+      }
+    } else {
+      router.push("/dashboard");
+    }
     router.refresh();
   }
 
@@ -97,12 +112,20 @@ export default function LoginPage() {
         </button>
       </form>
 
-      <p className="mt-6 text-center text-sm text-muted-foreground">
-        Don&apos;t have an account?{" "}
-        <Link href="/register" className="text-primary font-medium hover:underline">
-          Create one
-        </Link>
-      </p>
+      <div className="mt-6 space-y-2 text-center text-sm text-muted-foreground">
+        <p>
+          Don&apos;t have an account?{" "}
+          <Link href="/register" className="text-primary font-medium hover:underline">
+            Register as Student
+          </Link>
+        </p>
+        <p>
+          Are you a parent?{" "}
+          <Link href="/register-parent" className="text-primary font-medium hover:underline">
+            Register as Parent
+          </Link>
+        </p>
+      </div>
     </div>
   );
 }
