@@ -461,7 +461,7 @@ export default function PracticePage() {
   // ── Practice area ────────────────────────────────────────────────────────────
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="max-w-4xl mx-auto px-4 py-6 pb-24 sm:pb-6">
       {upgradeOverlay}
 
       {/* Header */}
@@ -616,7 +616,7 @@ export default function PracticePage() {
                             key={opt.letter}
                             onClick={() => setAnswer(sel ? "" : opt.letter)}
                             className={cn(
-                              "flex items-center gap-4 border-2 rounded-xl p-3.5 text-left transition-all duration-150",
+                              "flex items-center gap-4 border-2 rounded-xl p-4 sm:p-3.5 text-left transition-all duration-150 min-h-[52px]",
                               sel ? colors.selected : cn("bg-white", colors.base)
                             )}
                           >
@@ -699,18 +699,20 @@ export default function PracticePage() {
                     </div>
                   )}
 
-                  <button
-                    onClick={handleSubmit}
-                    disabled={submitting || (!answer.trim() && !answerImageUrl)}
-                    className="w-full py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
-                  >
-                    {submitting ? (
-                      <span className="flex items-center justify-center gap-2">
-                        <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-                        Marking…
-                      </span>
-                    ) : "Submit Answer"}
-                  </button>
+                  <div className="sm:relative fixed bottom-0 inset-x-0 sm:inset-auto bg-background/95 backdrop-blur-md sm:backdrop-blur-none sm:bg-transparent p-4 sm:p-0 border-t border-border sm:border-0 z-30 safe-area-inset-bottom">
+                    <button
+                      onClick={handleSubmit}
+                      disabled={submitting || (!answer.trim() && !answerImageUrl)}
+                      className="w-full py-3.5 sm:py-3 rounded-xl bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {submitting ? (
+                        <span className="flex items-center justify-center gap-2">
+                          <span className="w-4 h-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
+                          Marking…
+                        </span>
+                      ) : "Submit Answer"}
+                    </button>
+                  </div>
                 </div>
               )}
 

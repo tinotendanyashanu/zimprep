@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MathText } from "@/components/math-text";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -218,7 +219,9 @@ export default function AdminFlaggedPage() {
                     {q && (
                       <div>
                         <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-2">Question ({q.marks} marks)</p>
-                        <p className="text-sm text-foreground">{q.text}</p>
+                        <div className="text-sm text-foreground">
+                          <MathText text={q.text} />
+                        </div>
                       </div>
                     )}
 
@@ -250,7 +253,7 @@ export default function AdminFlaggedPage() {
                                   <svg className="w-3 h-3 text-green-500 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
                                   </svg>
-                                  {pt}
+                                  <MathText text={pt} />
                                 </li>
                               ))}
                             </ul>
@@ -265,7 +268,7 @@ export default function AdminFlaggedPage() {
                                   <svg className="w-3 h-3 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                   </svg>
-                                  {pt}
+                                  <MathText text={pt} />
                                 </li>
                               ))}
                             </ul>
@@ -274,7 +277,7 @@ export default function AdminFlaggedPage() {
                         {a.ai_feedback.examiner_note && (
                           <div className="sm:col-span-2 bg-muted border border-border rounded-xl p-3">
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider mb-1">Examiner Note</p>
-                            <p className="text-xs text-foreground">{a.ai_feedback.examiner_note}</p>
+                            <div className="text-xs text-foreground"><MathText text={a.ai_feedback.examiner_note} /></div>
                           </div>
                         )}
                       </div>

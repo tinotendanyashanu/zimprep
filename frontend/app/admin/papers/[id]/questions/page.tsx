@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { MathText } from "@/components/math-text";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -299,9 +300,25 @@ export default function QuestionsQAPage() {
                           )}
                         </div>
 
-                        <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
-                          {q.text}
-                        </p>
+                        <div className="text-sm text-foreground leading-relaxed">
+                          <MathText text={q.text} />
+                        </div>
+
+                        {/* Question image preview */}
+                        {q.image_url && (
+                          <div className="mt-3 rounded-xl border border-border bg-white overflow-hidden">
+                            <div className="px-3 py-1.5 border-b border-border bg-muted/40 text-xs text-muted-foreground font-medium">
+                              Figure / Diagram
+                            </div>
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={q.image_url}
+                              alt="Question diagram"
+                              className="w-full max-h-72 object-contain p-4"
+                              style={{ background: "white" }}
+                            />
+                          </div>
+                        )}
 
                         {q.topic_tags.length > 0 && (
                           <div className="flex items-center gap-1.5 mt-3 flex-wrap">

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { MathText } from "@/components/math-text";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -212,9 +213,9 @@ export default function ReviewQueuePage() {
                     );
                   })}
                 </div>
-                <p className="text-sm text-foreground line-clamp-2 whitespace-pre-wrap">
-                  {q.text || <span className="italic text-muted-foreground">No text extracted</span>}
-                </p>
+                <div className="text-sm text-foreground line-clamp-2">
+                  {q.text ? <MathText text={q.text} /> : <span className="italic text-muted-foreground">No text extracted</span>}
+                </div>
               </div>
               <svg
                 className={`w-4 h-4 text-muted-foreground mt-1 shrink-0 transition-transform ${isExpanded ? "rotate-180" : ""}`}
@@ -276,12 +277,16 @@ export default function ReviewQueuePage() {
                   /* Read-only view */
                   <div>
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Question text</p>
-                    <p className="text-sm text-foreground whitespace-pre-wrap">
-                      {q.text || <span className="italic text-muted-foreground">Empty</span>}
-                    </p>
+                    <div className="text-sm text-foreground">
+                      {q.text ? <MathText text={q.text} /> : <span className="italic text-muted-foreground">Empty</span>}
+                    </div>
                     {q.image_url && (
-                      <div className="mt-3 border border-border rounded-lg overflow-hidden max-h-48 bg-white">
-                        <img src={q.image_url} alt="diagram" className="max-h-48 w-auto mx-auto object-contain p-2" />
+                      <div className="mt-3 rounded-xl border border-border bg-white overflow-hidden">
+                        <div className="px-3 py-1.5 border-b border-border bg-muted/40 text-xs text-muted-foreground font-medium">
+                          Figure / Diagram
+                        </div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={q.image_url} alt="Question diagram" className="w-full max-h-72 object-contain p-4" style={{ background: "white" }} />
                       </div>
                     )}
                   </div>

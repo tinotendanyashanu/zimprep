@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { MathText } from "@/components/math-text";
 
 const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
@@ -194,7 +195,9 @@ export default function AdminDiagramsPage() {
                 {/* Full question text */}
                 <div>
                   <p className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1.5">Question text</p>
-                  <p className="text-sm text-foreground whitespace-pre-wrap">{q.text}</p>
+                  <div className="text-sm text-foreground">
+                    <MathText text={q.text} />
+                  </div>
                 </div>
 
                 {/* Current (failed) image if any */}

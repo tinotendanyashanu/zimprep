@@ -501,9 +501,9 @@ export default function ExamSessionPage() {
         </aside>
 
         {/* Main content */}
-        <main className="flex-1 max-w-2xl mx-auto px-4 sm:px-6 py-6 space-y-6">
+        <main className="flex-1 max-w-2xl mx-auto px-4 sm:px-6 py-6 pb-24 sm:pb-6 space-y-6">
           {/* Mobile question nav */}
-          <div className="flex md:hidden gap-1 overflow-x-auto pb-1">
+          <div className="flex md:hidden gap-1.5 overflow-x-auto pb-2 scrollbar-none -mx-4 px-4">
             {questions.map((q, i) => {
               const done = !!(answers[q.id] || answerImages[q.id]);
               return (
@@ -511,9 +511,9 @@ export default function ExamSessionPage() {
                   key={q.id}
                   onClick={() => { setCurrentIdx(i); }}
                   className={cn(
-                    "shrink-0 w-9 h-9 rounded-lg text-xs font-semibold",
-                    i === currentIdx ? "bg-primary text-primary-foreground" :
-                    done ? "bg-green-100 text-green-700" : "bg-muted text-muted-foreground"
+                    "shrink-0 w-10 h-10 rounded-xl text-sm font-semibold transition-all",
+                    i === currentIdx ? "bg-primary text-primary-foreground shadow-sm scale-105" :
+                    done ? "bg-green-100 text-green-700 border border-green-200" : "bg-muted text-muted-foreground"
                   )}
                 >
                   {i + 1}
@@ -567,7 +567,7 @@ export default function ExamSessionPage() {
                       key={opt.letter}
                       onClick={() => handleAnswerChange(currentQ.id, opt.letter)}
                       className={cn(
-                        "flex items-center gap-4 border-2 rounded-xl p-4 text-left transition-all duration-150 w-full",
+                        "flex items-center gap-4 border-2 rounded-xl p-4 text-left transition-all duration-150 w-full min-h-[56px]",
                         selected ? colors.selected : cn(colors.base, "bg-white")
                       )}
                     >
@@ -654,15 +654,15 @@ export default function ExamSessionPage() {
             />
           )}
 
-          {/* Navigation */}
+          {/* Navigation — sticky on mobile */}
           {!practiceResults[currentQ.id] && (
-            <div className="flex gap-3 pt-2">
+            <div className="flex gap-3 pt-2 sm:relative fixed bottom-0 inset-x-0 sm:inset-auto bg-background/95 backdrop-blur-md sm:backdrop-blur-none sm:bg-transparent p-4 sm:p-0 border-t border-border sm:border-0 z-30 safe-area-inset-bottom">
               <Button
                 disabled={currentIdx === 0}
                 onClick={() => { setCurrentIdx((i) => i - 1); setAnswerTab("text"); }}
                 variant="outline"
                 size="lg"
-                className="flex-1"
+                className="flex-1 h-12 sm:h-auto"
               >
                 ← Previous
               </Button>
@@ -671,7 +671,7 @@ export default function ExamSessionPage() {
                 onClick={() => { setCurrentIdx((i) => i + 1); setAnswerTab("text"); }}
                 variant="outline"
                 size="lg"
-                className="flex-1"
+                className="flex-1 h-12 sm:h-auto"
               >
                 Next →
               </Button>
