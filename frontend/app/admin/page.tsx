@@ -182,6 +182,8 @@ export default function AdminOverviewPage() {
   const [refreshedAt, setRefreshedAt] = useState<Date>(new Date());
   const [mcqResolving, setMcqResolving] = useState(false);
   const [mcqResult, setMcqResult] = useState<{ queued: number; papers?: number; message: string } | null>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [auditResult, setAuditResult] = useState<{ scanned?: number; message: string } | null>(null);
 
   function load() {
     setLoading(true);
@@ -199,6 +201,20 @@ export default function AdminOverviewPage() {
   }
 
   useEffect(() => { load(); }, []);
+
+  async function handleAuditQuestions() {
+    setAuditing(true);
+    setAuditResult(null);
+    try {
+      const res = await fetch(`${BACKEND}/admin/questions/audit`, { method: "POST" });
+      const data = await res.json();
+      setAuditResult(data);
+    } catch {
+      setAuditResult({ message: "Request failed — is the backend running?" });
+    } finally {
+      setAuditing(false);
+    }
+  }
 
   async function handleResolveMcqAnswers() {
     setMcqResolving(true);
@@ -753,6 +769,46 @@ export default function AdminOverviewPage() {
           {mcqResult && (
             <div className={`text-xs px-3 py-2 rounded-lg border ${mcqResult.queued > 0 ? "bg-green-50 border-green-200 text-green-800" : "bg-muted border-border text-muted-foreground"}`}>
               {mcqResult.message}
+            </div>
+          )}
+
+          <div className="border-t border-border pt-3 flex items-start justify-between gap-4">
+            <div>
+              <p className="text-sm font-medium text-foreground">Audit Question Quality</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Scan all visible questions for missing marks, short text, failed diagrams, or MCQ questions without options.
+                Issues are sent to the Review Queue for admin approval.
+              </p>
+            </div>
+            <button
+              onClick={handleAuditQuestions}
+              disabled={auditing}
+              className="shrink-0 inline-flex items-center gap-1.5 px-3.5 py-2 bg-card border border-border text-foreground text-xs font-medium rounded-lg hover:bg-muted/40 transition disabled:opacity-50"
+            >
+              {auditing ? (
+                <>
+                  <svg className="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Scanning…
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.598-3.751h-.152c-3.196 0-6.1-1.248-8.25-3.285z" />
+                  </svg>
+                  Run Audit
+                </>
+              )}
+            </button>
+          </div>
+          {auditResult && (
+            <div className={`text-xs px-3 py-2 rounded-lg border ${auditResult.scanned ? "bg-blue-50 border-blue-200 text-blue-800" : "bg-muted border-border text-muted-foreground"}`}>
+              {auditResult.message}
+              {auditResult.scanned && (
+                <Link href="/admin/review" className="ml-2 font-medium underline">Open Review Queue →</Link>
+              )}
             </div>
           )}
         </div>

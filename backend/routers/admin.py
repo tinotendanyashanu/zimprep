@@ -769,6 +769,81 @@ def mark_no_diagram(question_id: str) -> dict[str, Any]:
     return {"question_id": question_id, "diagram_status": "ok"}
 
 
+@router.post("/questions/audit")
+def audit_questions(background_tasks: BackgroundTasks) -> dict[str, Any]:
+    """
+    Scan all visible questions for extraction quality issues and send any
+    problems to the admin review queue.
+
+    Checks:
+    - marks = 0               → "marks_missing"
+    - text shorter than 15 chars (and no image) → "text_too_short"
+    - has_image=true but diagram_status='failed' → "diagram_no_bbox"
+    - question_type='mcq' with no mcq_options   → "mcq_options_missing"
+
+    Questions already in the review queue (needs_review=true) are skipped.
+    Runs in the background — returns immediately with a count of questions queued.
+    """
+    supabase = get_supabase()
+
+    # Fetch all questions not already flagged for review
+    result = (
+        supabase.table("question")
+        .select("id, marks, text, has_image, diagram_status, question_type, mcq_options, needs_review, review_reasons")
+        .eq("needs_review", False)
+        .execute()
+    )
+    questions = result.data or []
+
+    if not questions:
+        return {"flagged": 0, "message": "No questions to audit"}
+
+    def _run_audit() -> None:
+        flagged = 0
+        for q in questions:
+            reasons: list[str] = []
+
+            if int(q.get("marks") or 0) == 0:
+                reasons.append("marks_missing")
+
+            text = (q.get("text") or "").strip()
+            if len(text) < 15 and not q.get("has_image"):
+                reasons.append("text_too_short")
+
+            if q.get("has_image") and q.get("diagram_status") == "failed":
+                reasons.append("diagram_no_bbox")
+
+            if q.get("question_type") == "mcq":
+                opts = q.get("mcq_options")
+                if not opts or len(opts) < 2:
+                    reasons.append("mcq_options_missing")
+
+            if not reasons:
+                continue
+
+            try:
+                supabase.table("question").update({
+                    "needs_review": True,
+                    "hidden": True,
+                    "review_reasons": reasons,
+                }).eq("id", q["id"]).execute()
+                flagged += 1
+                logger.info(
+                    "Audit flagged question %s — reasons: %s", q["id"], reasons
+                )
+            except Exception as exc:
+                logger.error("Audit failed to flag question %s: %s", q["id"], exc)
+
+        logger.info("Question audit complete — %d/%d questions flagged", flagged, len(questions))
+
+    background_tasks.add_task(_run_audit)
+
+    return {
+        "scanned": len(questions),
+        "message": f"Auditing {len(questions)} question(s) in the background — results will appear in the Review Queue",
+    }
+
+
 @router.post("/paystack/create-plans")
 def create_paystack_plans() -> dict[str, Any]:
     """
