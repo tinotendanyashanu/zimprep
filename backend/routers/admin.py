@@ -880,6 +880,54 @@ def create_paystack_plans() -> dict[str, Any]:
     return {"created": created, "errors": errors}
 
 
+@router.post("/papers/{paper_id}/reextract")
+async def reextract_paper(paper_id: str, background_tasks: BackgroundTasks) -> dict[str, Any]:
+    """
+    Re-run extraction for an existing paper.
+    Deletes all existing questions, resets status to 'processing',
+    downloads the PDF from storage, and kicks off extraction in the background.
+    """
+    supabase = get_supabase()
+
+    paper = (
+        supabase.table("paper")
+        .select("id, subject_id, pdf_url, status")
+        .eq("id", paper_id)
+        .maybe_single()
+        .execute()
+    )
+    if not paper or not paper.data:
+        raise HTTPException(status_code=404, detail="Paper not found")
+
+    paper_data = paper.data
+
+    if paper_data["status"] == "processing":
+        raise HTTPException(status_code=409, detail="Extraction already in progress")
+
+    pdf_url: str = paper_data["pdf_url"]
+    if "/papers/" not in pdf_url:
+        raise HTTPException(status_code=400, detail="Cannot determine PDF storage path from URL")
+    storage_path = pdf_url.split("/papers/", 1)[1]
+    # Strip any query params (e.g. ?token=...)
+    storage_path = storage_path.split("?")[0]
+
+    try:
+        pdf_bytes = supabase.storage.from_(PDF_BUCKET).download(storage_path)
+    except Exception as exc:
+        logger.error("Failed to download PDF for re-extraction %s: %s", paper_id, exc)
+        raise HTTPException(status_code=500, detail=f"PDF download failed: {exc}")
+
+    # Delete existing questions (mcq_answer rows cascade via FK)
+    supabase.table("question").delete().eq("paper_id", paper_id).execute()
+
+    # Reset status
+    supabase.table("paper").update({"status": "processing"}).eq("id", paper_id).execute()
+
+    background_tasks.add_task(run_extraction, paper_id, pdf_bytes, paper_data["subject_id"])
+
+    return {"paper_id": paper_id, "status": "processing"}
+
+
 @router.post("/mcq/resolve-answers")
 def resolve_all_mcq_answers(background_tasks: BackgroundTasks) -> dict[str, Any]:
     """

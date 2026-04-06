@@ -12,6 +12,14 @@ async function deletePaper(paperId: string): Promise<void> {
   }
 }
 
+async function reextractPaper(paperId: string): Promise<void> {
+  const res = await fetch(`${BACKEND}/admin/papers/${paperId}/reextract`, { method: "POST" });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as { detail?: string }).detail ?? `Re-extract failed (${res.status})`);
+  }
+}
+
 type Subject = { id: string; name: string; level: string; exam_board?: string };
 type Paper = {
   id: string;
@@ -64,6 +72,8 @@ export default function AdminPapersPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [reextractingId, setReextractingId] = useState<string | null>(null);
+  const [reextractError, setReextractError] = useState<string | null>(null);
 
   const [examBoard, setExamBoard] = useState<ExamBoard>("zimsec");
   const [subjectMode, setSubjectMode] = useState<"existing" | "new">("existing");
@@ -204,6 +214,19 @@ export default function AdminPapersPage() {
       setDeleteError(err instanceof Error ? err.message : "Delete failed");
     } finally {
       setDeleting(false);
+    }
+  }
+
+  async function handleReextract(paperId: string) {
+    setReextractingId(paperId);
+    setReextractError(null);
+    try {
+      await reextractPaper(paperId);
+      loadPapers();
+    } catch (err: unknown) {
+      setReextractError(err instanceof Error ? err.message : "Re-extract failed");
+    } finally {
+      setReextractingId(null);
     }
   }
 
@@ -460,6 +483,25 @@ export default function AdminPapersPage() {
                           ) : (
                             <span className="text-red-600 text-xs">Extraction failed</span>
                           )}
+                          {p.status !== "processing" && (
+                            <button
+                              onClick={() => handleReextract(p.id)}
+                              disabled={reextractingId === p.id}
+                              className="text-muted-foreground hover:text-foreground transition disabled:opacity-50"
+                              title="Re-run extraction"
+                            >
+                              {reextractingId === p.id ? (
+                                <svg className="animate-spin w-4 h-4" fill="none" viewBox="0 0 24 24">
+                                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+                                </svg>
+                              )}
+                            </button>
+                          )}
                           <button
                             onClick={() => { setConfirmDeleteId(p.id); setDeleteError(null); }}
                             className="text-red-400 hover:text-red-600 transition"
@@ -478,6 +520,14 @@ export default function AdminPapersPage() {
             </div>
           )}
         </div>
+
+      {/* Re-extract error toast */}
+      {reextractError && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl shadow-lg">
+          <span>{reextractError}</span>
+          <button onClick={() => setReextractError(null)} className="text-red-400 hover:text-red-600">✕</button>
+        </div>
+      )}
 
       {/* Delete confirmation modal */}
       {confirmDeleteId && (
