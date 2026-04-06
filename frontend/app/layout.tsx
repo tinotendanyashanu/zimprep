@@ -30,12 +30,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="light scroll-smooth" suppressHydrationWarning>
+    <html lang="en" className="light scroll-smooth max-w-full overflow-x-hidden" suppressHydrationWarning>
       <body
-        className={`${inter.variable} ${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground`}
+        className={`${inter.variable} ${dmSans.variable} antialiased font-sans bg-background text-foreground selection:bg-primary/20 selection:text-primary-foreground max-w-full overflow-x-hidden`}
         suppressHydrationWarning
       >
-        <main className="relative">{children}</main>
+        <main className="relative min-h-screen max-w-full overflow-x-hidden">{children}</main>
       </body>
     </html>
   );

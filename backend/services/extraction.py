@@ -2,9 +2,9 @@
 PDF Extraction Pipeline
 
 Renders each PDF page as a JPEG image (using PyMuPDF) and sends them to
-Google Gemini 2.0 Flash for structured question extraction. This approach
-handles both scanned and digital PDFs, and preserves all mathematical notation
-as LaTeX.
+Google Gemini 2.0 Flash for structured question extraction. 2.0 Flash matches
+2.5 Flash quality for deterministic JSON extraction at ~5× lower cost — budget
+is better spent on Gemini 2.5 Flash (with thinking) in the marking pipeline.
 
 Math notation:
   Inline: \\( ... \\)   e.g. \\(x^2 + 2x + 1\\)
@@ -12,13 +12,10 @@ Math notation:
 
 Diagram pipeline:
   1. Gemini returns image_bbox [x0,y0,x1,y1] as page fractions for each diagram
-  2. We crop that region at high DPI using PyMuPDF
-  3. We ask Gemini to redraw the cropped region as clean SVG
-  4. SVG (or fallback cropped PNG) is stored and linked to the question
+  2. We crop that region at 150 DPI using PyMuPDF and store the PNG directly
 """
 from __future__ import annotations
 
-import base64
 import json
 import logging
 import os
@@ -104,19 +101,6 @@ QUESTION EXTRACTION RULES:
 
 Return ONLY a valid JSON array of objects with exactly these fields. No markdown. No preamble."""
 
-SVG_REDRAW_PROMPT = """You are a technical illustrator. Recreate this exam diagram as accurate, clean SVG.
-
-Rules:
-- Reproduce ALL labels, numbers, arrows, tick marks, axes, and dimensions exactly as shown
-- Use viewBox="0 0 500 400" — adjust width/height ratio to match the diagram's aspect ratio
-- White background: <rect width="100%" height="100%" fill="white"/>
-- Black lines and text (stroke="black", fill="black") unless the original uses colour
-- Use <text> for all labels, font-family="serif", appropriate font-size
-- Use <line>, <path>, <circle>, <rect>, <polygon> for shapes
-- Use <marker> with arrowhead for arrows
-- Output ONLY the raw SVG — start your response with <svg and end with </svg>
-- No explanation, no markdown fences, no preamble"""
-
 
 def _render_pages(pdf_bytes: bytes, dpi: int = 100) -> list[bytes]:
     """
@@ -139,7 +123,7 @@ def _crop_diagram_region(
     pdf_bytes: bytes,
     page_index: int,
     bbox_frac: list[float],
-    dpi: int = 220,
+    dpi: int = 150,
 ) -> bytes | None:
     """
     Crop and render just the diagram region from a page at high DPI.
@@ -169,38 +153,6 @@ def _crop_diagram_region(
         logger.warning("Diagram crop failed (page %d): %s", page_index, exc)
         return None
 
-
-def _redraw_as_svg(image_bytes: bytes) -> str | None:
-    """
-    Ask Gemini to recreate a diagram image as clean SVG.
-    Returns the SVG string if successful, otherwise None.
-    """
-    try:
-        client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
-
-        response = _gemini_call_with_retry(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                SVG_REDRAW_PROMPT,
-            ],
-        )
-
-        raw = (response.text or "").strip()
-
-        # Extract from first <svg to last </svg>
-        start = raw.find("<svg")
-        end = raw.rfind("</svg>")
-        if start != -1 and end != -1:
-            return raw[start: end + len("</svg>")]
-
-        logger.warning("SVG redraw did not return valid SVG. Raw (first 300 chars): %s", raw[:300])
-        return None
-
-    except Exception as exc:
-        logger.warning("SVG redraw failed: %s", exc)
-        return None
 
 
 def _upload_image(
@@ -236,11 +188,10 @@ def _process_diagram(
     page_url: str | None,
 ) -> tuple[str | None, bool]:
     """
-    Crop the diagram region, attempt SVG redraw, upload, and return (url, is_ok).
+    Crop the diagram region at 150 DPI and upload as PNG.
 
-    is_ok=True  → a proper diagram image (SVG or tight-cropped PNG) was stored.
-    is_ok=False → fell back to the full page URL or have nothing useful; the
-                  question should be quarantined for admin review.
+    is_ok=True  → tight-cropped PNG stored.
+    is_ok=False → fell back to the full page URL; question flagged for admin review.
     """
     if bbox_frac is None:
         return page_url, False
@@ -249,17 +200,6 @@ def _process_diagram(
     if cropped is None:
         return page_url, False
 
-    # Try SVG redraw first
-    svg = _redraw_as_svg(cropped)
-    if svg:
-        svg_bytes = svg.encode("utf-8")
-        path = f"{paper_id}/diagram_{q_key}.svg"
-        url = _upload_image(svg_bytes, path, "image/svg+xml")
-        if url:
-            logger.info("SVG diagram stored: %s", path)
-            return url, True
-
-    # Fall back to cropped PNG
     path = f"{paper_id}/diagram_{q_key}.png"
     url = _upload_image(cropped, path, "image/png")
     if url:
@@ -269,7 +209,7 @@ def _process_diagram(
     return page_url, False
 
 
-_INITIAL_BATCH_SIZE = 2  # 2 pages per call keeps each request well under the 90s Cloudflare timeout
+_INITIAL_BATCH_SIZE = 4  # 4 pages per call — fewer calls = fewer repeated system-prompt tokens
 
 
 def _strip_json_fences(raw: str) -> str:
@@ -356,11 +296,13 @@ def _call_gemini_for_pages(
 
     response = _gemini_call_with_retry(
         client.models.generate_content,
-        model="gemini-2.5-flash",
+        # gemini-2.0-flash: same quality as 2.5-flash for structured JSON extraction
+        # at ~5× lower cost. Thinking not available on 2.0-flash.
+        model="gemini-2.0-flash",
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=65536,
+            max_output_tokens=16384,
         ),
     )
 

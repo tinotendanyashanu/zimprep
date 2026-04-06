@@ -259,7 +259,11 @@ def mark_attempt(attempt_id: str) -> None:
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction=MARKING_SYSTEM_PROMPT,
-                max_output_tokens=1024,
+                # Allow limited thinking for marking — reasoning over student answers
+                # meaningfully improves score accuracy. 1024 tokens is enough for
+                # most questions without running up large thinking bills.
+                max_output_tokens=2048,
+                thinking_config=types.ThinkingConfig(thinking_budget=1024),
             ),
         )
         raw = (response.text or "").strip()

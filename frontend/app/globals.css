@@ -80,11 +80,38 @@
 }
 
 @layer base {
-  * {
-    @apply border-border outline-ring/50;
+  :root {
+    --background: #F5F5F7;
+    --foreground: #1D1D1F;
+    --card: #FFFFFF;
+    --card-foreground: #1D1D1F;
+    --primary: #00875F;
+    --primary-foreground: #FFFFFF;
+    --secondary: #EBEBEB;
+    --secondary-foreground: #1D1D1F;
+    --muted: #F5F5F7;
+    --muted-foreground: #86868B;
+    --accent: #00875F;
+    --accent-foreground: #FFFFFF;
+    --border: #D2D2D7;
+    --input: #E5E5E5;
+    --ring: #00875F;
+    --radius: 0.75rem;
   }
+
+  * {
+    @apply border-border outline-ring/50 box-border;
+  }
+
+  html, body {
+    @apply max-w-full overflow-x-hidden;
+    position: relative;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-x: none;
+  }
+
   body {
-    @apply bg-background text-foreground antialiased;
+    @apply bg-background text-foreground antialiased min-h-screen;
     font-feature-settings: "ss01", "ss02", "cv01", "cv02";
   }
 }
