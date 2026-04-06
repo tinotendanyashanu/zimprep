@@ -75,9 +75,10 @@ function FeedbackCard({ result, question, onNext, onFlag, flagged }: {
   result: PracticeAttemptResult;
   question: Question;
   onNext: () => void;
-  onFlag: () => void;
+  onFlag: (reason: "question_issue" | "marking_issue") => void;
   flagged: boolean;
 }) {
+  const [picking, setPicking] = useState(false);
   const score = result.ai_score ?? 0;
   const pct = question.marks > 0 ? score / question.marks : 0;
   const isGood = pct >= 0.7;
@@ -155,13 +156,26 @@ function FeedbackCard({ result, question, onNext, onFlag, flagged }: {
         >
           Next Question →
         </button>
-        <button
-          onClick={onFlag}
-          disabled={flagged}
-          className="px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted disabled:opacity-40 transition"
-        >
-          {flagged ? "Flagged" : "Flag"}
-        </button>
+        {flagged ? (
+          <span className="px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground opacity-40">Flagged</span>
+        ) : picking ? (
+          <div className="flex gap-2">
+            <button
+              onClick={() => { onFlag("question_issue"); setPicking(false); }}
+              className="flex-1 py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+            >Question issue</button>
+            <button
+              onClick={() => { onFlag("marking_issue"); setPicking(false); }}
+              className="flex-1 py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+            >Marking issue</button>
+            <button onClick={() => setPicking(false)} className="px-3 py-2 text-xs text-muted-foreground hover:bg-muted rounded-xl transition">✕</button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setPicking(true)}
+            className="px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+          >Flag</button>
+        )}
       </div>
     </div>
   );
@@ -300,9 +314,9 @@ export default function PracticePage() {
     }
   }
 
-  async function handleFlag() {
+  async function handleFlag(reason: "question_issue" | "marking_issue") {
     if (!result) return;
-    try { await flagAttempt(result.id); setFlagged(true); } catch {}
+    try { await flagAttempt(result.id, reason); setFlagged(true); } catch {}
   }
 
   async function handleImageFile(file: File) {
