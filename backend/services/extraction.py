@@ -102,19 +102,22 @@ QUESTION EXTRACTION RULES:
 Return ONLY a valid JSON array of objects with exactly these fields. No markdown. No preamble."""
 
 
-def _render_pages(pdf_bytes: bytes, dpi: int = 100) -> list[bytes]:
+def _render_pages(pdf_bytes: bytes, dpi: int = 150) -> list[bytes]:
     """
     Render every PDF page to JPEG bytes at the given DPI.
 
-    100 DPI + JPEG at 80 % quality is sufficient for Gemini to read text
-    and is ~10× smaller than 150 DPI PNG, cutting token usage dramatically.
+    150 DPI + JPEG at 92% quality balances cost and legibility for scanned
+    documents. Scanned pages are already lossy — double-compressing at 80%
+    degrades subscripts, superscripts, and handwritten annotations enough to
+    cause extraction errors. 150 DPI keeps token cost reasonable (still JPEG,
+    not PNG) while keeping text sharp enough for reliable Gemini recognition.
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     pages: list[bytes] = []
     mat = fitz.Matrix(dpi / 72, dpi / 72)
     for page in doc:
         pix = page.get_pixmap(matrix=mat)
-        pages.append(pix.tobytes("jpeg", jpg_quality=80))
+        pages.append(pix.tobytes("jpeg", jpg_quality=92))
     doc.close()
     return pages
 
@@ -209,7 +212,7 @@ def _process_diagram(
     return page_url, False
 
 
-_INITIAL_BATCH_SIZE = 4  # 4 pages per call — fewer calls = fewer repeated system-prompt tokens
+_INITIAL_BATCH_SIZE = 2  # 2 pages per call — gives Gemini focused attention on dense scanned pages
 
 
 def _strip_json_fences(raw: str) -> str:
