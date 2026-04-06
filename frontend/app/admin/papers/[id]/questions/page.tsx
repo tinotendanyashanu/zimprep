@@ -16,6 +16,7 @@ type Question = {
   image_url: string | null;
   topic_tags: string[];
   question_type: string;
+  hidden: boolean;
 };
 
 type EditState = {
@@ -38,6 +39,7 @@ export default function QuestionsQAPage() {
   });
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (!paperId) return;
@@ -64,6 +66,24 @@ export default function QuestionsQAPage() {
   function cancelEdit() {
     setEditingId(null);
     setSaveError(null);
+  }
+
+  async function toggleHidden(questionId: string) {
+    setTogglingId(questionId);
+    try {
+      const res = await fetch(`${BACKEND}/admin/questions/${questionId}/hidden`, {
+        method: "PATCH",
+      });
+      if (!res.ok) throw new Error("Toggle failed");
+      const { hidden } = await res.json();
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, hidden } : q))
+      );
+    } catch {
+      // silently ignore — the button will revert visually on next load
+    } finally {
+      setTogglingId(null);
+    }
   }
 
   async function saveEdit(questionId: string) {
@@ -124,6 +144,11 @@ export default function QuestionsQAPage() {
           <h1 className="text-2xl font-semibold text-foreground">Question QA Review</h1>
           <p className="text-muted-foreground text-sm mt-1">
             {questions.length} question{questions.length !== 1 ? "s" : ""} extracted
+            {questions.filter((q) => q.hidden).length > 0 && (
+              <span className="ml-2 text-red-600 font-medium">
+                · {questions.filter((q) => q.hidden).length} hidden from students
+              </span>
+            )}
           </p>
         </div>
 
@@ -138,7 +163,7 @@ export default function QuestionsQAPage() {
             {questions.map((q) => (
               <div
                 key={q.id}
-                className="bg-card border border-border rounded-2xl p-5"
+                className={`bg-card border rounded-2xl p-5 ${q.hidden ? "border-red-300 bg-red-50/40 opacity-70" : "border-border"}`}
               >
                 {editingId === q.id ? (
                   /* Edit mode */
@@ -267,6 +292,11 @@ export default function QuestionsQAPage() {
                               has image
                             </span>
                           )}
+                          {q.hidden && (
+                            <span className="bg-red-100 text-red-700 border border-red-300 px-1.5 py-0.5 rounded text-xs font-medium">
+                              hidden from students
+                            </span>
+                          )}
                         </div>
 
                         <p className="text-sm text-foreground leading-relaxed whitespace-pre-wrap">
@@ -287,12 +317,26 @@ export default function QuestionsQAPage() {
                         )}
                       </div>
 
-                      <button
-                        onClick={() => startEdit(q)}
-                        className="flex-shrink-0 text-xs text-primary font-medium hover:underline"
-                      >
-                        Edit
-                      </button>
+                      <div className="flex flex-col items-end gap-2 flex-shrink-0">
+                        <button
+                          onClick={() => startEdit(q)}
+                          className="text-xs text-primary font-medium hover:underline"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => toggleHidden(q.id)}
+                          disabled={togglingId === q.id}
+                          title={q.hidden ? "Show to students" : "Hide from students"}
+                          className={`text-xs font-medium px-2.5 py-1 rounded-lg border transition disabled:opacity-50 ${
+                            q.hidden
+                              ? "bg-red-100 text-red-700 border-red-300 hover:bg-red-200"
+                              : "bg-muted text-muted-foreground border-border hover:border-red-300 hover:text-red-600"
+                          }`}
+                        >
+                          {togglingId === q.id ? "…" : q.hidden ? "Hidden" : "Hide"}
+                        </button>
+                      </div>
                     </div>
                   </div>
                 )}

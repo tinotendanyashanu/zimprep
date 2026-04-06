@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -84,6 +85,10 @@ QUESTION EXTRACTION RULES:
     - Use **bold** for emphasis or column headers already bold in the paper
     - Use \n for line breaks between parts
     - Do NOT use heading markers (#) — just plain text with tables/bold as needed
+  CRITICAL — no filler whitespace: if a diagram or figure appears where question text would be,
+  set has_image=true and image_bbox, then write only the actual question words in text.
+  NEVER insert blank lines or repeated \n to represent empty space or a diagram's position.
+  Maximum 2 consecutive \n characters anywhere in text.
 - has_image: true if the question contains or references a diagram, graph, figure, or table
 - image_bbox: ONLY when has_image is true — the bounding box of the diagram/figure as
   [x0, y0, x1, y1] where each value is a fraction of the page (0.0=top-left, 1.0=bottom-right).
@@ -234,8 +239,6 @@ def _fix_json_escapes(raw: str) -> str:
     These are invalid JSON escape sequences. Fix by doubling any backslash that
     isn't part of a legitimate JSON escape: \\n \\r \\t \\" \\\\.
     """
-    import re
-
     def _replacer(m: re.Match) -> str:
         next_char = m.group(1)
         # Keep valid JSON escape sequences unchanged
@@ -245,6 +248,17 @@ def _fix_json_escapes(raw: str) -> str:
         return '\\\\' + next_char
 
     return re.sub(r'\\(.)', _replacer, raw)
+
+
+def _sanitise_question_text(text: str) -> str:
+    """
+    Clean up hallucinated whitespace from extracted question text.
+    The model sometimes inserts dozens of \\n characters to 'represent' the
+    space occupied by a diagram instead of setting has_image=true.
+    Collapse any run of 3+ newlines down to 2, and strip trailing whitespace.
+    """
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 
 def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
@@ -303,7 +317,7 @@ def _call_gemini_for_pages(
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=16384,
+            max_output_tokens=32768,
             # Thinking disabled — extraction is deterministic structured output.
             # thinking_budget=0 cuts cost by ~90% vs default (no thinking tokens billed).
             thinking_config=types.ThinkingConfig(thinking_budget=0),
@@ -438,20 +452,41 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
             q_type = q.get("question_type", "written")
             options = q.get("options") if q_type == "mcq" else None
+            marks = int(q.get("marks", 0))
+            text = _sanitise_question_text(str(q.get("text", "")))
+
+            # ── Quality checks — flag questions that need admin review ──────────
+            review_reasons: list[str] = []
+            if marks == 0:
+                review_reasons.append("marks_missing")
+            if len(text.strip()) < 15:
+                review_reasons.append("text_too_short")
+            if diagram_status == "failed":
+                review_reasons.append("diagram_no_bbox")
+
+            needs_review = len(review_reasons) > 0
+            # Hide from students until an admin approves the question.
+            # diagram_status="failed" questions are already hidden via the
+            # papers router filter; hidden=True covers the other cases.
+            auto_hidden = needs_review
+
             rows.append({
                 "paper_id": paper_id,
                 "subject_id": subject_id,
                 "question_number": str(q.get("question_number", "")),
                 "sub_question": q.get("sub_question"),
                 "section": q.get("section"),
-                "marks": int(q.get("marks", 0)),
-                "text": str(q.get("text", "")),
+                "marks": marks,
+                "text": text,
                 "has_image": has_image,
                 "image_url": image_url,
                 "diagram_status": diagram_status,
                 "topic_tags": q.get("topic_tags", []),
                 "question_type": q_type,
                 "mcq_options": options,
+                "needs_review": needs_review,
+                "review_reasons": review_reasons,
+                "hidden": auto_hidden,
                 "_correct_option": q.get("correct_option"),  # temp field, stripped before insert
             })
 

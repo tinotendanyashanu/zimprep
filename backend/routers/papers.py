@@ -70,6 +70,7 @@ def list_questions_for_paper(paper_id: str) -> list[dict[str, Any]]:
         .select("*")
         .eq("paper_id", paper_id)
         .neq("diagram_status", "failed")   # hide questions pending diagram review
+        .eq("hidden", False)               # hide questions marked bad by admin
         .order("question_number")
         .execute()
     )

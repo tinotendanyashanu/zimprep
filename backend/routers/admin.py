@@ -244,6 +244,35 @@ def update_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, 
     return result.data[0]
 
 
+@router.patch("/questions/{question_id}/hidden")
+def toggle_question_hidden(question_id: str) -> dict[str, Any]:
+    """
+    Toggle the hidden flag on a question.
+    Hidden questions are never shown to students — use this to suppress
+    incorrectly extracted questions without deleting them.
+    """
+    supabase = get_supabase()
+
+    current = (
+        supabase.table("question")
+        .select("id, hidden")
+        .eq("id", question_id)
+        .maybe_single()
+        .execute()
+    )
+    if not current or not current.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+
+    new_hidden = not current.data["hidden"]
+    result = (
+        supabase.table("question")
+        .update({"hidden": new_hidden})
+        .eq("id", question_id)
+        .execute()
+    )
+    return {"question_id": question_id, "hidden": new_hidden}
+
+
 @router.delete("/papers/{paper_id}")
 def delete_paper(paper_id: str) -> dict[str, Any]:
     """
@@ -569,6 +598,74 @@ def list_subscriptions(limit: int = 50, offset: int = 0) -> dict[str, Any]:
         "total": result.count or 0,
         "subscriptions": enriched,
     }
+
+
+@router.get("/questions/review-queue")
+def list_review_queue(limit: int = 100, offset: int = 0) -> dict[str, Any]:
+    """
+    List questions flagged for admin review (marks missing, text too short,
+    or diagram bbox unavailable). These are hidden from students until approved.
+    """
+    supabase = get_supabase()
+    result = (
+        supabase.table("question")
+        .select(
+            "id, question_number, sub_question, section, marks, text, has_image, image_url, "
+            "topic_tags, question_type, needs_review, review_reasons, hidden, diagram_status, paper_id, "
+            "paper(year, paper_number, exam_session, subject(name, level))",
+            count="exact",
+        )
+        .eq("needs_review", True)
+        .order("paper_id")
+        .order("question_number")
+        .range(offset, offset + limit - 1)
+        .execute()
+    )
+    return {
+        "total": result.count or 0,
+        "questions": result.data or [],
+    }
+
+
+@router.patch("/questions/{question_id}/discard")
+def discard_question(question_id: str) -> dict[str, Any]:
+    """
+    Discard a reviewed question: clear the review flag and keep it hidden.
+    Use when the extraction is unfixable — the question stays off the platform.
+    """
+    supabase = get_supabase()
+    result = (
+        supabase.table("question")
+        .update({"needs_review": False, "review_reasons": [], "hidden": True})
+        .eq("id", question_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return {"question_id": question_id, "discarded": True}
+
+
+@router.patch("/questions/{question_id}/approve")
+def approve_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, Any]:
+    """
+    Approve a reviewed question: apply any edits, clear needs_review, un-hide.
+    The admin should fix text/marks before calling this.
+    """
+    supabase = get_supabase()
+    updates = body.model_dump(exclude_none=True)
+    updates["needs_review"] = False
+    updates["review_reasons"] = []
+    updates["hidden"] = False
+
+    result = (
+        supabase.table("question")
+        .update(updates)
+        .eq("id", question_id)
+        .execute()
+    )
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Question not found")
+    return result.data[0]
 
 
 @router.get("/questions/diagram-review")
