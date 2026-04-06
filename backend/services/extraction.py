@@ -60,7 +60,16 @@ def _gemini_call_with_retry(fn, *args, **kwargs):
 
 
 EXTRACTION_SYSTEM_PROMPT = r"""You are an expert at reading ZIMSEC and Cambridge past exam papers from images.
-Extract every question from the provided exam paper page images and return a single JSON array.
+Extract every question from the provided exam paper page images and return a single JSON array of Question objects.
+
+HIERARCHY & STRUCTURE — CRITICAL:
+- Main questions: Usually numbered 1, 2, 3...
+- Sub-questions: Usually lettered (a), (b), (c)...
+- Nested sub-parts: Usually roman numerals (i), (ii), (iii)...
+- If a main question (e.g., "1") has sub-questions (a), (b), (c), return it as a single Question object with a `sub_parts` array.
+- If a sub-question (e.g., "(a)") has further parts (i), (ii), return them inside that sub-question's `sub_parts`.
+- NEVER skip a part. Ensure every (a), (b), (i), (ii) is captured.
+- If a question spans multiple pages, combine it into one object.
 
 MATH FORMATTING — CRITICAL:
 - All mathematical expressions MUST use LaTeX delimiters:
@@ -73,38 +82,27 @@ MATH FORMATTING — CRITICAL:
 - Square roots: \(\sqrt{x}\), \(\sqrt[3]{x}\)
 - Never use plain text like "x2" or "H2O" for math — always use LaTeX
 
-QUESTION EXTRACTION RULES:
-- question_number: the main number as a string ("1", "2", etc.)
-- sub_question: letter or roman numeral for sub-parts ("a", "b", "i", "ii") or null
-- section: section label ("A", "B", "C") or null
-- marks: integer mark value. Parse from "[2]" or "(2 marks)" etc. Use 0 if not shown.
-- text: the question stem ONLY — do NOT include A/B/C/D option lines in this field.
-  For MCQ, text is the question before the options. Preserve all math in LaTeX.
+QUESTION OBJECT FIELDS:
+- question_number: string ("1", "2", etc.)
+- section: string ("A", "B", etc.) or null
+- text: string. Question stem ONLY. Do NOT include options or numbers.
   Use Markdown formatting where appropriate:
-    - Use | pipe tables for any table in the question (e.g. comparison tables, data tables)
-    - Use **bold** for emphasis or column headers already bold in the paper
+    - Use | pipe tables for any table in the question
+    - Use **bold** for emphasis or column headers
     - Use \n for line breaks between parts
-    - Do NOT use heading markers (#) — just plain text with tables/bold as needed
-  CRITICAL — no filler whitespace: if a diagram or figure appears where question text would be,
-  set has_image=true and image_bbox, then write only the actual question words in text.
-  NEVER insert blank lines or repeated \n to represent empty space or a diagram's position.
-  Maximum 2 consecutive \n characters anywhere in text.
-- has_image: true if the question contains or references a diagram, graph, figure, or table
-- image_bbox: ONLY when has_image is true — the bounding box of the diagram/figure as
-  [x0, y0, x1, y1] where each value is a fraction of the page (0.0=top-left, 1.0=bottom-right).
+- marks: integer mark value. Parse from "[2]" or "(2 marks)" etc. Default to 0.
+- question_type: "mcq" or "written".
+- mcq_options: array of {letter, text} for MCQ, else null.
+- has_image: boolean. true if diagram/figure/graph/table is present.
+- image_bbox: [x0, y0, x1, y1] (0.0 to 1.0 page fractions) if has_image is true, else null.
   Be precise — crop tightly around just the diagram, not the whole page.
-  Example: a diagram in the middle of the page might be [0.05, 0.35, 0.95, 0.65]
-  If you cannot determine the position, use null.
-- question_type: "mcq" if A/B/C/D options are listed, otherwise "written"
-- options: ONLY for MCQ questions — array of {letter, text} for each option.
-  Example: [{"letter":"A","text":"Hydrogen"},{"letter":"B","text":"Oxygen"},...]
-  Use null for written questions.
-- correct_option: ONLY if the answer key is printed on the paper — "A", "B", "C", or "D".
-  Use null if not shown (most question papers do not show the answer).
-- topic_tags: 1–3 short topic labels e.g. ["Quadratic Equations"] or ["Acids and Bases"]
-- page_number: the 1-based page number where this question appears (use the [Page N] labels)
+- topic_tags: array of 1–3 short strings.
+- page_number: integer (1-based).
+- sub_parts: array of sub-question objects with: {id, text, marks, question_type, mcq_options, has_image, image_bbox, sub_parts}.
+  - `id` is the part label like "a", "b", "i", "ii".
+- correct_option: ONLY if answer key is printed — "A", "B", "C", or "D", else null.
 
-Return ONLY a valid JSON array of objects with exactly these fields. No markdown. No preamble."""
+Return ONLY a valid JSON array. No preamble, no markdown fences."""
 
 
 def _render_pages(pdf_bytes: bytes, dpi: int = 150) -> list[bytes]:
@@ -233,6 +231,107 @@ def _strip_json_fences(raw: str) -> str:
     return raw
 
 
+def _flatten_questions(nested: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Convert nested Question objects into flat database-ready rows."""
+    rows = []
+    for q in nested:
+        q_num = str(q.get("question_number", ""))
+        section = q.get("section")
+        page = q.get("page_number", 1)
+        tags = q.get("topic_tags", [])
+
+        # Add main question row if it has text or marks
+        main_text = str(q.get("text", "")).strip()
+        main_marks = int(q.get("marks", 0))
+        sub_parts = q.get("sub_parts") or []
+
+        if main_text or main_marks > 0:
+            rows.append({
+                "question_number": q_num,
+                "sub_question": None,
+                "section": section,
+                "page_number": page,
+                "topic_tags": tags,
+                "text": main_text,
+                "marks": main_marks,
+                "question_type": q.get("question_type", "written"),
+                "mcq_options": q.get("mcq_options"),
+                "has_image": bool(q.get("has_image", False)),
+                "image_bbox": q.get("image_bbox"),
+                "correct_option": q.get("correct_option"),
+            })
+
+        # Process nested parts
+        for part in sub_parts:
+            rows.extend(_flatten_part(part, q_num, section, page, tags, main_text))
+    return rows
+
+
+def _flatten_part(
+    part: dict[str, Any],
+    q_num: str,
+    section: str | None,
+    page: int,
+    tags: list[str],
+    parent_text: str,
+    parent_id: str = "",
+) -> list[dict[str, Any]]:
+    """Recursively flatten sub-parts, prepending parent context to text."""
+    part_id = str(part.get("id", "")).strip("() ")
+    full_id = f"{parent_id}({part_id})" if parent_id else part_id
+    current_text = str(part.get("text", "")).strip()
+
+    # Prepend parent text for context if it exists
+    combined_text = f"{parent_text}\n\n{current_text}".strip() if parent_text else current_text
+
+    row = {
+        "question_number": q_num,
+        "sub_question": full_id,
+        "section": section,
+        "page_number": page,
+        "topic_tags": tags,
+        "text": combined_text,
+        "marks": int(part.get("marks", 0)),
+        "question_type": part.get("question_type", "written"),
+        "mcq_options": part.get("mcq_options"),
+        "has_image": bool(part.get("has_image", False)),
+        "image_bbox": part.get("image_bbox"),
+        "correct_option": part.get("correct_option"),
+    }
+
+    res = []
+    sub_parts = part.get("sub_parts") or []
+
+    # If this part has marks, MCQ options, or no further sub-parts, it's a leaf/answerable question
+    if not sub_parts or row["marks"] > 0 or row["question_type"] == "mcq":
+        res.append(row)
+
+    # Recurse into deeper parts
+    for sub in sub_parts:
+        res.extend(_flatten_part(sub, q_num, section, page, tags, combined_text, full_id))
+    return res
+
+
+def _validate_extracted_rows(rows: list[dict[str, Any]]) -> list[str]:
+    """Check flattened rows for common extraction errors."""
+    reasons = []
+    for i, row in enumerate(rows):
+        q_label = f"Q{row['question_number']}"
+        if row['sub_question']:
+            q_label += f"({row['sub_question']})"
+
+        if not row.get("text") and not row.get("has_image"):
+            reasons.append(f"{q_label}: Missing text and diagram")
+        if row.get("question_type") == "mcq" and not row.get("mcq_options"):
+            reasons.append(f"{q_label}: MCQ missing options")
+        if row.get("has_image") and not row.get("image_bbox"):
+            reasons.append(f"{q_label}: Diagram flagged but missing bbox")
+        if len(str(row.get("text", ""))) < 10 and not row.get("has_image"):
+            reasons.append(f"{q_label}: Text suspiciously short")
+
+    return reasons
+
+
 def _fix_json_escapes(raw: str) -> str:
     """
     Gemini outputs LaTeX notation (\\(, \\frac, \\sqrt, etc.) inside JSON strings.
@@ -294,6 +393,110 @@ def _recover_partial_json_array(raw: str) -> list[dict[str, Any]]:
         raw[:500],
     )
     return []
+
+
+_MCQ_RESOLVE_SYSTEM_PROMPT = """You are an expert ZIMSEC/Cambridge examiner.
+For each MCQ question listed below, determine the single correct answer (A, B, C, or D).
+Return ONLY valid JSON: an object where keys are the 0-based question index (as a string)
+and values are the single correct letter. Example: {"0": "B", "1": "A", "2": "D"}
+No preamble. No markdown. No explanation outside the JSON."""
+
+
+def _resolve_missing_mcq_answers(
+    paper_id: str,
+    mcq_questions: list[dict[str, Any]],
+) -> None:
+    """
+    Call Gemini ONCE to determine correct answers for MCQ questions whose
+    answer key was not printed in the paper.
+
+    Each element of mcq_questions must have:
+      question_id, text, mcq_options (list of {letter, text} or None)
+    """
+    if not mcq_questions:
+        return
+
+    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
+    supabase = get_supabase()
+
+    parts: list[str] = []
+    for i, q in enumerate(mcq_questions):
+        opts = q.get("mcq_options") or []
+        if opts:
+            opts_text = "  |  ".join(
+                f"{o['letter']}: {o['text']}"
+                for o in opts
+                if isinstance(o, dict) and o.get("letter") and o.get("text")
+            )
+        else:
+            opts_text = "No options stored"
+        parts.append(f"{i}. {q['text']}\n   Options: {opts_text}")
+
+    prompt = "\n\n".join(parts)
+
+    try:
+        response = _gemini_call_with_retry(
+            client.models.generate_content,
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=_MCQ_RESOLVE_SYSTEM_PROMPT,
+                max_output_tokens=512,
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        raw = _strip_json_fences(response.text or "")
+        answers: dict[str, str] = json.loads(raw)
+    except Exception as exc:
+        logger.error(
+            "LLM MCQ answer resolution failed for paper %s: %s", paper_id, exc
+        )
+        return
+
+    stored = 0
+    for idx_str, letter in answers.items():
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if idx >= len(mcq_questions):
+            continue
+
+        q = mcq_questions[idx]
+        letter = str(letter).strip().upper()
+
+        if letter not in ("A", "B", "C", "D"):
+            logger.warning(
+                "LLM returned invalid MCQ answer '%s' for question %s — skipping",
+                letter, q["question_id"],
+            )
+            continue
+
+        # Validate answer matches one of the stored option letters
+        opts = q.get("mcq_options") or []
+        option_letters = {o["letter"] for o in opts if isinstance(o, dict) and o.get("letter")}
+        if option_letters and letter not in option_letters:
+            logger.warning(
+                "LLM answer '%s' not in stored option letters %s for question %s — skipping",
+                letter, sorted(option_letters), q["question_id"],
+            )
+            continue
+
+        try:
+            supabase.table("mcq_answer").insert(
+                {"question_id": q["question_id"], "correct_option": letter}
+            ).execute()
+            stored += 1
+        except Exception as exc2:
+            logger.warning(
+                "Failed to store LLM-resolved MCQ answer for question %s: %s",
+                q["question_id"], exc2,
+            )
+
+    logger.info(
+        "LLM resolved %d/%d missing MCQ answer keys for paper %s",
+        stored, len(mcq_questions), paper_id,
+    )
 
 
 def _call_gemini_for_pages(
@@ -409,12 +612,16 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             page_urls.append(url)
 
         # 3. Extract questions via Gemini vision
-        questions = _parse_questions_from_pages(page_images)
-        logger.info("Extracted %d questions for paper %s", len(questions), paper_id)
+        nested_questions = _parse_questions_from_pages(page_images)
+        logger.info("Extracted %d main questions for paper %s", len(nested_questions), paper_id)
 
-        # 4 & 5. Process diagrams and build DB rows
-        rows = []
-        for q_idx, q in enumerate(questions):
+        # 4. Flatten and validate
+        all_rows = _flatten_questions(nested_questions)
+        logger.info("Flattened into %d total parts for paper %s", len(all_rows), paper_id)
+
+        # 5. Process diagrams and finalize rows
+        db_rows = []
+        for q_idx, q in enumerate(all_rows):
             page_num = int(q.get("page_number", 1))
             page_idx = max(0, min(page_num - 1, len(page_urls) - 1))
             has_image = bool(q.get("has_image", False))
@@ -446,62 +653,50 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                     image_url = page_urls[page_idx]
                     diagram_status = "failed"
                     logger.warning(
-                        "Question %d has_image=True but no valid bbox — flagged for diagram review",
-                        q_idx,
+                        "Question %d (%s) has_image=True but no valid bbox",
+                        q_idx, q.get("question_number")
                     )
 
-            q_type = q.get("question_type", "written")
-            options = q.get("options") if q_type == "mcq" else None
-            marks = int(q.get("marks", 0))
-            text = _sanitise_question_text(str(q.get("text", "")))
-
             # ── Quality checks — flag questions that need admin review ──────────
-            review_reasons: list[str] = []
-            if marks == 0:
-                review_reasons.append("marks_missing")
-            if len(text.strip()) < 15:
-                review_reasons.append("text_too_short")
+            review_reasons = _validate_extracted_rows([q])
             if diagram_status == "failed":
-                review_reasons.append("diagram_no_bbox")
+                review_reasons.append("diagram_failed_to_crop")
 
             needs_review = len(review_reasons) > 0
-            # Hide from students until an admin approves the question.
-            # diagram_status="failed" questions are already hidden via the
-            # papers router filter; hidden=True covers the other cases.
             auto_hidden = needs_review
 
-            rows.append({
+            db_rows.append({
                 "paper_id": paper_id,
                 "subject_id": subject_id,
                 "question_number": str(q.get("question_number", "")),
                 "sub_question": q.get("sub_question"),
                 "section": q.get("section"),
-                "marks": marks,
-                "text": text,
+                "marks": int(q.get("marks", 0)),
+                "text": _sanitise_question_text(str(q.get("text", ""))),
                 "has_image": has_image,
                 "image_url": image_url,
                 "diagram_status": diagram_status,
                 "topic_tags": q.get("topic_tags", []),
-                "question_type": q_type,
-                "mcq_options": options,
+                "question_type": q.get("question_type", "written"),
+                "mcq_options": q.get("mcq_options"),
                 "needs_review": needs_review,
                 "review_reasons": review_reasons,
                 "hidden": auto_hidden,
                 "_correct_option": q.get("correct_option"),  # temp field, stripped before insert
             })
 
-        # Check paper still exists before inserting (it may have been deleted while extraction ran)
+        # Check paper still exists before inserting
         paper_check = supabase.table("paper").select("id").eq("id", paper_id).execute()
         if not paper_check.data:
-            logger.warning("Paper %s was deleted during extraction — discarding results", paper_id)
+            logger.warning("Paper %s deleted during extraction — discarding", paper_id)
             return
 
-        if rows:
+        if db_rows:
             # Strip the temporary _correct_option field before inserting
-            correct_options = {i: r.pop("_correct_option", None) for i, r in enumerate(rows)}
-            result = supabase.table("question").insert(rows).execute()
+            correct_options = {i: r.pop("_correct_option", None) for i, r in enumerate(db_rows)}
+            result = supabase.table("question").insert(db_rows).execute()
 
-            # Insert mcq_answer rows for questions that have a known correct option
+            # Insert mcq_answer rows
             inserted = result.data or []
             mcq_answer_rows = []
             for i, inserted_q in enumerate(inserted):
@@ -514,21 +709,40 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             if mcq_answer_rows:
                 supabase.table("mcq_answer").insert(mcq_answer_rows).execute()
                 logger.info(
-                    "Stored %d MCQ answer keys for paper %s",
+                    "Stored %d MCQ answer keys from paper (printed answer key) for paper %s",
                     len(mcq_answer_rows), paper_id,
                 )
 
+            # For MCQ questions without a printed answer key, resolve via LLM (one batch call)
+            answered_indices = {
+                i for i, correct in correct_options.items()
+                if correct in ("A", "B", "C", "D")
+            }
+            mcq_missing_answers: list[dict[str, Any]] = []
+            for i, inserted_q in enumerate(inserted):
+                if db_rows[i].get("question_type") == "mcq" and i not in answered_indices:
+                    mcq_missing_answers.append({
+                        "question_id": inserted_q["id"],
+                        "text": db_rows[i].get("text", ""),
+                        "mcq_options": db_rows[i].get("mcq_options"),
+                    })
+            if mcq_missing_answers:
+                logger.info(
+                    "%d MCQ question(s) have no printed answer key — resolving via LLM for paper %s",
+                    len(mcq_missing_answers), paper_id,
+                )
+                _resolve_missing_mcq_answers(paper_id, mcq_missing_answers)
+
         # 6. Mark paper ready (or error if nothing was extracted)
-        if not rows:
-            logger.error("Extraction produced 0 questions for paper %s — marking as error", paper_id)
+        if not db_rows:
+            logger.error("Extraction produced 0 questions for paper %s", paper_id)
             supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
             return
 
         supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
         logger.info(
             "Extraction complete for paper %s — %d questions inserted",
-            paper_id,
-            len(rows),
+            paper_id, len(db_rows),
         )
 
     except Exception as exc:

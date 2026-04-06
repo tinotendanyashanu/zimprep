@@ -12,7 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from db.client import get_supabase
-from services.marking import mark_session
+from services.marking import generate_mcq_explanations, mark_session
 from services.quota import check_exam_quota
 
 logger = logging.getLogger(__name__)
@@ -284,6 +284,18 @@ def submit_session(
 
     background_tasks.add_task(mark_session, session_id)
     return {"status": "submitted", "session_id": session_id}
+
+
+@router.post("/{session_id}/mcq-explanations")
+def get_mcq_explanations(session_id: str) -> dict[str, Any]:
+    """
+    Generate explanations for all incorrectly answered MCQ questions in a session.
+    Makes ONE LLM call to explain all wrong answers in a single batch.
+    Returns {attempt_id: explanation_string} for each wrong MCQ attempt.
+    Only called on explicit student request — not automatically on submission.
+    """
+    explanations = generate_mcq_explanations(session_id)
+    return {"explanations": explanations}
 
 
 @router.get("/{session_id}/results")

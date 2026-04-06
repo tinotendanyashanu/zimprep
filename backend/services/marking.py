@@ -280,6 +280,135 @@ def mark_attempt(attempt_id: str) -> None:
     _update_attempt(attempt_id, result, marks)
 
 
+_MCQ_EXPLANATION_SYSTEM_PROMPT = """You are an expert ZIMSEC/Cambridge examiner.
+For each MCQ question listed below, explain concisely (2–3 sentences) why the correct answer is correct
+and, where the student chose wrong, why their choice is incorrect.
+Return ONLY valid JSON: an object where keys are the 0-based question index (as a string)
+and values are explanation strings.
+Example: {"0": "The correct answer is B because...", "1": "C is correct here because..."}
+No preamble. No markdown. No extra keys."""
+
+
+def generate_mcq_explanations(session_id: str) -> dict[str, str]:
+    """
+    Make ONE LLM call to explain all incorrectly answered MCQ questions in a session.
+    Returns a dict mapping attempt_id → explanation string.
+    Only called on explicit student request (on-demand) or end-of-exam trigger.
+    """
+    supabase = get_supabase()
+
+    # Fetch all MCQ attempts in this session with question data
+    attempts_result = (
+        supabase.table("attempt")
+        .select(
+            "id, question_id, student_answer, ai_score, "
+            "question!inner(marks, text, mcq_options, question_type)"
+        )
+        .eq("session_id", session_id)
+        .execute()
+    )
+    attempts = attempts_result.data or []
+
+    # Only process wrong MCQ attempts that were actually marked
+    wrong_mcq: list[dict[str, Any]] = []
+    for a in attempts:
+        q = a.get("question") or {}
+        if q.get("question_type") != "mcq":
+            continue
+        marks = int(q.get("marks") or 1)
+        score = int(a.get("ai_score") or 0)
+        if score >= marks:
+            continue  # correct — no explanation needed
+
+        # Look up the stored correct answer
+        mcq_row = (
+            supabase.table("mcq_answer")
+            .select("correct_option")
+            .eq("question_id", a["question_id"])
+            .maybe_single()
+            .execute()
+        )
+        correct = mcq_row.data["correct_option"] if (mcq_row and mcq_row.data) else None
+
+        wrong_mcq.append({
+            "attempt_id": a["id"],
+            "text": q.get("text", ""),
+            "mcq_options": q.get("mcq_options") or [],
+            "student_answer": (a.get("student_answer") or "").strip().upper(),
+            "correct_answer": correct,
+        })
+
+    if not wrong_mcq:
+        return {}
+
+    # Build ONE batch prompt for all wrong MCQ questions
+    from google import genai
+    from google.genai import types
+
+    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
+
+    prompt_lines: list[str] = []
+    for i, item in enumerate(wrong_mcq):
+        opts = item["mcq_options"]
+        if opts:
+            opts_text = "  |  ".join(
+                f"{o['letter']}: {o['text']}"
+                for o in opts
+                if isinstance(o, dict) and o.get("letter") and o.get("text")
+            )
+        else:
+            opts_text = "No options stored"
+        correct = item["correct_answer"] or "Unknown"
+        student = item["student_answer"] or "None"
+        prompt_lines.append(
+            f"{i}. {item['text']}\n"
+            f"   Options: {opts_text}\n"
+            f"   Correct answer: {correct}  |  Student chose: {student}"
+        )
+
+    prompt = "\n\n".join(prompt_lines)
+
+    try:
+        response = _gemini_call_with_retry(
+            client.models.generate_content,
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=_MCQ_EXPLANATION_SYSTEM_PROMPT,
+                max_output_tokens=min(4096, 256 + len(wrong_mcq) * 200),
+                thinking_config=types.ThinkingConfig(thinking_budget=0),
+            ),
+        )
+        raw = (response.text or "").strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        raw_explanations: dict[str, str] = json.loads(raw)
+    except Exception as exc:
+        logger.error(
+            "MCQ batch explanation failed for session %s: %s", session_id, exc
+        )
+        return {}
+
+    # Map index → attempt_id
+    result: dict[str, str] = {}
+    for idx_str, explanation in raw_explanations.items():
+        try:
+            idx = int(idx_str)
+        except ValueError:
+            continue
+        if idx < len(wrong_mcq):
+            result[wrong_mcq[idx]["attempt_id"]] = str(explanation)
+
+    logger.info(
+        "Generated MCQ explanations for %d/%d wrong attempts in session %s",
+        len(result), len(wrong_mcq), session_id,
+    )
+    return result
+
+
 def mark_session(session_id: str) -> None:
     """
     Batch mark all attempts in a session. Designed to run as a FastAPI BackgroundTask.

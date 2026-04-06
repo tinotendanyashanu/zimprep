@@ -15,7 +15,7 @@ IMAGE_BUCKET = "question-images"
 
 from db.client import get_supabase
 from db.models_subscription import TIER_CONFIG, PAID_TIERS, PAYSTACK_PLAN_NAMES
-from services.extraction import run_extraction
+from services.extraction import run_extraction, _resolve_missing_mcq_answers
 from services import paystack as ps
 
 logger = logging.getLogger(__name__)
@@ -803,3 +803,64 @@ def create_paystack_plans() -> dict[str, Any]:
             logger.error("Failed to create plan for tier '%s': %s", tier, exc)
 
     return {"created": created, "errors": errors}
+
+
+@router.post("/mcq/resolve-answers")
+def resolve_all_mcq_answers(background_tasks: BackgroundTasks) -> dict[str, Any]:
+    """
+    Backfill MCQ correct answers for all existing questions that have no entry
+    in the mcq_answer table. Makes one batched Gemini call per paper.
+    Runs in the background — returns immediately with a count of questions queued.
+    """
+    supabase = get_supabase()
+
+    # Find all MCQ questions that have no mcq_answer row
+    questions_result = (
+        supabase.table("question")
+        .select("id, paper_id, text, mcq_options")
+        .eq("question_type", "mcq")
+        .eq("hidden", False)
+        .execute()
+    )
+    all_mcq = questions_result.data or []
+
+    if not all_mcq:
+        return {"queued": 0, "message": "No MCQ questions found"}
+
+    # Find which ones already have an answer stored
+    answered_result = supabase.table("mcq_answer").select("question_id").execute()
+    answered_ids = {row["question_id"] for row in (answered_result.data or [])}
+
+    missing = [q for q in all_mcq if q["id"] not in answered_ids]
+    if not missing:
+        return {"queued": 0, "message": "All MCQ questions already have stored answers"}
+
+    # Group by paper so each paper gets one batched Gemini call
+    by_paper: dict[str, list[dict[str, Any]]] = {}
+    for q in missing:
+        by_paper.setdefault(q["paper_id"], []).append({
+            "question_id": q["id"],
+            "text": q["text"] or "",
+            "mcq_options": q["mcq_options"],
+        })
+
+    def _run_backfill() -> None:
+        for paper_id, qs in by_paper.items():
+            try:
+                _resolve_missing_mcq_answers(paper_id, qs)
+            except Exception as exc:
+                logger.error(
+                    "MCQ backfill failed for paper %s: %s", paper_id, exc
+                )
+
+    background_tasks.add_task(_run_backfill)
+
+    logger.info(
+        "MCQ answer backfill queued: %d questions across %d papers",
+        len(missing), len(by_paper),
+    )
+    return {
+        "queued": len(missing),
+        "papers": len(by_paper),
+        "message": f"Resolving {len(missing)} MCQ answers across {len(by_paper)} paper(s) in the background",
+    }

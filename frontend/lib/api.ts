@@ -298,6 +298,11 @@ export const submitSession = (sessionId: string, answers: Record<string, string>
 export const getResults = (sessionId: string) =>
   apiFetch<ResultsResponse>(`/sessions/${sessionId}/results`);
 
+export const getMcqExplanations = (sessionId: string) =>
+  apiFetch<{ explanations: Record<string, string> }>(`/sessions/${sessionId}/mcq-explanations`, {
+    method: "POST",
+  });
+
 export const submitAttempt = (
   sessionId: string,
   questionId: string,

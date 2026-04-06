@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
 FROM_EMAIL = os.getenv("FROM_EMAIL", "ZimPrep <noreply@zimprep.com>")
 RESEND_URL = "https://api.resend.com/emails"
+APP_URL = os.getenv("APP_URL", "http://localhost:3000").rstrip("/")
 
 
 def _send(to: str, subject: str, html: str) -> None:
@@ -47,7 +48,7 @@ def send_welcome_email(email: str, name: str, role: str = "student") -> None:
         <h2>Welcome to ZimPrep, {name}!</h2>
         <p>Your Parent Account is ready. You can link your child's account to track
         their exam preparation progress in real time.</p>
-        <p><a href="https://zimprep.com/parent/dashboard">Go to Parent Dashboard →</a></p>
+        <p><a href="{APP_URL}/parent/dashboard">Go to Parent Dashboard →</a></p>
         <p>— The ZimPrep Team</p>
         """
         subject = "Welcome to ZimPrep — Parent Account Ready"
@@ -56,7 +57,7 @@ def send_welcome_email(email: str, name: str, role: str = "student") -> None:
         <h2>Welcome to ZimPrep, {name}!</h2>
         <p>You're all set to start mastering your ZIMSEC exams. Practice with real
         past papers and get instant AI feedback on every answer.</p>
-        <p><a href="https://zimprep.com/dashboard">Start Practising →</a></p>
+        <p><a href="{APP_URL}/dashboard">Start Practising →</a></p>
         <p>— The ZimPrep Team</p>
         """
         subject = "Welcome to ZimPrep — Let's get started!"
@@ -73,7 +74,7 @@ def send_report_ready_email(
 ) -> None:
     """Send report-ready email after exam marking completes."""
     percentage = round(score / total_marks * 100) if total_marks else 0
-    results_url = f"https://zimprep.com/exam/{session_id}/results"
+    results_url = f"{APP_URL}/exam/{session_id}/results"
     body = f"""
     <h2>Your results are in, {name}!</h2>
     <table style="border-collapse:collapse;margin:16px 0;">
@@ -132,7 +133,7 @@ def send_weekly_digest_email(email: str, name: str, stats: dict[str, Any]) -> No
       </tr>
     </table>
     {weak_list_html}
-    <p><a href="https://zimprep.com/dashboard">Keep Practising →</a></p>
+    <p><a href="{APP_URL}/dashboard">Keep Practising →</a></p>
     <p>— The ZimPrep Team</p>
     """
     _send(email, "Your ZimPrep Weekly Digest", body)

@@ -17,6 +17,7 @@ from typing import Any
 
 from db.client import get_supabase
 from services import email as email_svc
+from services.email import APP_URL
 
 logger = logging.getLogger(__name__)
 
@@ -320,7 +321,7 @@ def send_weekly_report_email(
       </table>
 
       <p style="margin-top:24px;">
-        <a href="https://zimprep.com/parent/dashboard"
+        <a href="{APP_URL}/parent/dashboard"
            style="background:#111827;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">
           View Full Dashboard →
         </a>
@@ -353,7 +354,7 @@ def send_alert_email(
       <p>Hi {parent_name},</p>
       <p style="font-size:16px;line-height:1.6;background:#f3f4f6;padding:16px;border-radius:8px;">{message}</p>
       <p>
-        <a href="https://zimprep.com/parent/dashboard"
+        <a href="{APP_URL}/parent/dashboard"
            style="background:#111827;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:bold;">
           View Dashboard →
         </a>

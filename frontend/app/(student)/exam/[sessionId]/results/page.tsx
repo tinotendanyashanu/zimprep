@@ -4,7 +4,7 @@ import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  getResults, getSession, getQuestionsForPaper, flagAttempt,
+  getResults, getSession, getQuestionsForPaper, flagAttempt, getMcqExplanations,
   type ResultsResponse, type Question, type MCQOption,
 } from "@/lib/api";
 import { MathText } from "@/components/math-text";
@@ -78,6 +78,8 @@ export default function ResultsPage() {
   const [flagPicking, setFlagPicking] = useState<string | null>(null); // attemptId choosing reason
   const [flagging, setFlagging] = useState<string | null>(null); // attemptId submitting
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [mcqExplanations, setMcqExplanations] = useState<Record<string, string>>({});
+  const [loadingExplanations, setLoadingExplanations] = useState(false);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -114,6 +116,15 @@ export default function ResultsPage() {
       setFlagPicking(null);
     } catch {}
     finally { setFlagging(null); }
+  }
+
+  async function handleExplainMistakes() {
+    setLoadingExplanations(true);
+    try {
+      const data = await getMcqExplanations(sessionId);
+      setMcqExplanations(data.explanations ?? {});
+    } catch {}
+    finally { setLoadingExplanations(false); }
   }
 
   const questionMarks: Record<string, number> = {};
@@ -282,6 +293,14 @@ export default function ResultsPage() {
                     </div>
                     )}
 
+                    {/* MCQ explanation (on-demand, batch-generated) */}
+                    {isMcq && mcqExplanations[attempt.id] && (
+                      <div className="bg-blue-50 border border-blue-200 rounded-lg px-3 py-2.5 text-sm">
+                        <p className="text-xs font-semibold text-blue-700 uppercase tracking-wide mb-1">Explanation</p>
+                        <p className="text-blue-900">{mcqExplanations[attempt.id]}</p>
+                      </div>
+                    )}
+
                     {attempt.ai_feedback && (
                       <>
                         {attempt.ai_feedback.correct_points.length > 0 && (
@@ -372,6 +391,24 @@ export default function ResultsPage() {
           })}
         </div>
       </div>
+
+      {/* Explain MCQ mistakes — one LLM call for all wrong MCQs */}
+      {results.attempts.some((a) => {
+        const q = questions.find((x) => x.id === a.question_id);
+        return q?.question_type === "mcq" && (a.ai_score ?? 0) < (questionMarks[a.question_id] ?? 1);
+      }) && (
+        <button
+          onClick={handleExplainMistakes}
+          disabled={loadingExplanations || Object.keys(mcqExplanations).length > 0}
+          className="w-full py-2.5 border border-blue-200 bg-blue-50 rounded-xl text-sm font-medium text-blue-700 hover:bg-blue-100 transition disabled:opacity-60 disabled:cursor-default"
+        >
+          {loadingExplanations
+            ? "Generating explanations…"
+            : Object.keys(mcqExplanations).length > 0
+              ? "Explanations loaded ✓"
+              : "Explain My MCQ Mistakes"}
+        </button>
+      )}
 
       {/* Actions */}
       <div className="grid grid-cols-2 gap-3">

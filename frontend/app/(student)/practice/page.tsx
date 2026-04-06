@@ -27,6 +27,11 @@ const LEVEL_COLORS: Record<string, string> = {
   O:      "bg-green-100 text-green-700 border-green-200",
   A:      "bg-purple-100 text-purple-700 border-purple-200",
 };
+const LEVEL_LABELS: Record<string, string> = {
+  Grade7: "Grade 7",
+  O:      "O Level",
+  A:      "A Level",
+};
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -407,10 +412,9 @@ export default function PracticePage() {
           <div key={level} className="space-y-3">
             <div className="flex items-center gap-2">
               <span className={cn("text-xs font-semibold px-2.5 py-0.5 rounded-full border", LEVEL_COLORS[level] ?? "bg-muted text-muted-foreground border-border")}>
-                {level === "Grade7" ? "Grade 7" : level === "O" ? "O Level" : "A Level"}
+                {LEVEL_LABELS[level] ?? `${level} Level`}
               </span>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            </div>            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {subs.map((s) => (
                 <button
                   key={s.id}
@@ -457,7 +461,7 @@ export default function PracticePage() {
         <div>
           <h1 className="font-bold text-foreground text-lg">{selectedSubject?.name}</h1>
           <p className="text-xs text-muted-foreground">
-            {selectedPaperNumber ? `Paper ${selectedPaperNumber}` : "All Papers"} · {selectedSubject?.level} Level
+            {selectedPaperNumber ? `Paper ${selectedPaperNumber}` : "All Papers"} · {LEVEL_LABELS[selectedSubject?.level ?? ""] ?? `${selectedSubject?.level} Level`}
           </p>
         </div>
       </div>
