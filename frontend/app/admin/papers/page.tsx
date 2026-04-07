@@ -474,7 +474,7 @@ export default function AdminPapersPage() {
                       <td className="py-3 pr-4"><StatusBadge status={p.status} /></td>
                       <td className="py-3">
                         <div className="flex items-center gap-3">
-                          {p.status === "ready" ? (
+                          {["ready", "processed", "needs_review", "partial"].includes(p.status) ? (
                             <a href={`/admin/papers/${p.id}/questions`} className="text-primary text-xs font-medium hover:underline">
                               Review Questions →
                             </a>
