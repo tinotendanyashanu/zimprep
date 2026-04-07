@@ -25,8 +25,10 @@ import json
 import logging
 import os
 import re
+import threading
+import time
 from collections import Counter
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
 from typing import Any
 
@@ -110,7 +112,8 @@ def _extract_ocr_text_from_images(page_images: list[bytes]) -> list[str]:
             logger.debug("OCR failed for page %d (non-critical): %s", i + 1, exc)
             return ""
 
-    max_workers = min(3, len(page_images)) or 1
+    total_pages = len(page_images)
+    max_workers = 1 if total_pages <= 6 else 2
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         texts = list(executor.map(_ocr_single, enumerate(page_images)))
 
@@ -258,7 +261,7 @@ def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]
     mime = "image/png" if is_scanned else "image/jpeg"
     doc.close()
 
-    max_workers = min(3, total_pages) or 1
+    max_workers = 1 if total_pages <= 6 else 2
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         pages = list(
             executor.map(
@@ -516,15 +519,13 @@ Return ONLY a valid JSON array. No preamble, no markdown fences, no explanation.
 # Maximum pages to send in a single Gemini call.
 # Gemini 2.5 Flash supports very large context — send as many pages as possible
 # for full paper context. Only split if we hit token limits.
-_MAX_PAGES_PER_CALL = 10
+_MAX_PAGES_PER_CALL = 3
 
 
 def _thinking_budget_for_page_count(page_count: int) -> int:
-    if page_count <= 5:
-        return 4096
-    if page_count <= 10:
-        return 8192
-    return 10240
+    if page_count <= 3:
+        return 0
+    return 2048
 
 
 def _call_gemini_extract(
@@ -533,6 +534,9 @@ def _call_gemini_extract(
     mime_type: str,
     embedded_texts: list[str] | None = None,
     pre_detection_context: str = "",
+    *,
+    thinking_budget: int | None = None,
+    max_output_tokens: int = 8000,
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Send page images through the LLM router with thinking enabled for extraction.
@@ -575,9 +579,14 @@ def _call_gemini_extract(
         parts,
         EXTRACTION_SYSTEM_PROMPT,
         {
-            "max_output_tokens": 65536,
-            "thinking_budget": _thinking_budget_for_page_count(len(page_images)),
+            "max_output_tokens": max_output_tokens,
+            "thinking_budget": (
+                _thinking_budget_for_page_count(len(page_images))
+                if thinking_budget is None
+                else thinking_budget
+            ),
             "batch_pages": len(page_images),
+            "batch_size": len(page_images),
         },
     )
 
@@ -651,6 +660,7 @@ def _parse_questions_from_pages(
     mime_type: str,
     embedded_texts: list[str] | None = None,
     pre_detection_context: str = "",
+    force_batch_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """
     Extract questions from all pages using the routed LLM chain with full paper context.
@@ -660,6 +670,32 @@ def _parse_questions_from_pages(
     Uses overlapping page windows to catch cross-page questions at batch
     boundaries.
     """
+    total_pages = len(page_images)
+
+    def _worker_limit() -> int:
+        return 1 if total_pages <= 6 else 2
+
+    def _run_degraded_single_page_recovery(start_index: int, end_index: int) -> list[dict[str, Any]]:
+        logger.warning(
+            "Degraded recovery mode for pages %d–%d: batch_size=1 thinking=off max_tokens=4000",
+            start_index + 1,
+            end_index,
+        )
+        recovered: list[dict[str, Any]] = []
+        for page_index in range(start_index, end_index):
+            batch_texts = embedded_texts[page_index: page_index + 1] if embedded_texts else None
+            questions, _ = _call_gemini_extract(
+                page_images[page_index: page_index + 1],
+                page_offset=page_index,
+                mime_type=mime_type,
+                embedded_texts=batch_texts,
+                pre_detection_context=pre_detection_context,
+                thinking_budget=0,
+                max_output_tokens=4000,
+            )
+            recovered.extend(questions)
+        return recovered
+
     def _extract_batch(start_index: int) -> list[dict[str, Any]]:
         batch_size = min(_MAX_PAGES_PER_CALL, len(page_images) - start_index)
 
@@ -677,6 +713,13 @@ def _parse_questions_from_pages(
                     pre_detection_context=pre_detection_context,
                 )
             except Exception as exc:
+                if "ALL_LLM_PROVIDERS_FAILED" in str(exc):
+                    try:
+                        return _run_degraded_single_page_recovery(start_index, end_index)
+                    except Exception as degraded_exc:
+                        raise RuntimeError(
+                            f"Degraded extraction failed for pages {start_index + 1}–{end_index}: {degraded_exc}"
+                        ) from degraded_exc
                 raise RuntimeError(
                     f"Extraction failed for pages {start_index + 1}–{end_index} after all retries: {exc}"
                 ) from exc
@@ -704,23 +747,36 @@ def _parse_questions_from_pages(
     if not page_images:
         return []
 
-    batch_starts: list[int] = []
-    i = 0
-    while i < len(page_images):
-        batch_starts.append(i)
-        advance = min(_MAX_PAGES_PER_CALL, len(page_images) - i)
-        if i + advance < len(page_images) and advance > _OVERLAP_PAGES:
-            advance -= _OVERLAP_PAGES
-        i += advance
+    batch_starts: list[int]
+    if not force_batch_mode and len(page_images) <= _MAX_PAGES_PER_CALL:
+        batch_starts = [0]
+    else:
+        batch_starts = []
+        i = 0
+        while i < len(page_images):
+            batch_starts.append(i)
+            advance = min(_MAX_PAGES_PER_CALL, len(page_images) - i)
+            if i + advance < len(page_images) and advance > _OVERLAP_PAGES:
+                advance -= _OVERLAP_PAGES
+            i += advance
 
-    max_workers = min(3, len(batch_starts)) or 1
+    results: list[dict[str, Any]] = []
+    max_workers = min(_worker_limit(), len(batch_starts)) or 1
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        batch_results = list(executor.map(_extract_batch, batch_starts))
-
-    results = [question for batch in batch_results for question in batch]
+        futures = {executor.submit(_extract_batch, start_index): start_index for start_index in batch_starts}
+        for future in as_completed(futures):
+            start_index = futures[future]
+            batch_questions = future.result()
+            results.extend(batch_questions)
+            logger.info(
+                "Partial extraction merged for pages starting at %d: +%d questions (%d total so far)",
+                start_index + 1,
+                len(batch_questions),
+                len(results),
+            )
 
     # Dedup questions from overlapping windows
-    if len(page_images) > _MAX_PAGES_PER_CALL:
+    if len(page_images) > _MAX_PAGES_PER_CALL or force_batch_mode:
         before = len(results)
         results = _dedup_questions(results)
         if len(results) < before:
@@ -802,8 +858,9 @@ def _verify_extraction(
             parts,
             VERIFICATION_SYSTEM_PROMPT,
             {
-                "max_output_tokens": 65536,
-                "thinking_budget": 8192,
+                "max_output_tokens": 8000,
+                "thinking_budget": _thinking_budget_for_page_count(len(page_images)),
+                "batch_size": len(page_images),
             },
         )
 
@@ -1418,6 +1475,228 @@ def _store_pdf_hash(paper_id: str, pdf_hash: str) -> None:
         logger.debug("Could not store pdf_hash (column may not exist): %s", exc)
 
 
+def _build_db_rows(
+    *,
+    all_rows: list[dict[str, Any]],
+    page_urls: list[str | None],
+    pdf_bytes: bytes,
+    paper_id: str,
+    subject_id: str,
+) -> tuple[list[dict[str, Any]], int]:
+    db_rows: list[dict[str, Any]] = []
+    low_confidence_count = 0
+
+    for q_idx, q in enumerate(all_rows):
+        page_num = int(q.get("page_number", 1))
+        page_idx = max(0, min(page_num - 1, len(page_urls) - 1))
+        has_image = bool(q.get("has_image", False))
+        image_url = None
+        diagram_status = "ok"
+
+        if has_image:
+            bbox_frac = q.get("image_bbox")
+            if (
+                isinstance(bbox_frac, list)
+                and len(bbox_frac) == 4
+                and all(isinstance(v, (int, float)) for v in bbox_frac)
+                and bbox_frac[0] < bbox_frac[2]
+                and bbox_frac[1] < bbox_frac[3]
+            ):
+                q_key = f"q{q_idx:04d}_p{page_idx:04d}"
+                image_url, diagram_ok = _process_diagram(
+                    pdf_bytes,
+                    page_idx,
+                    bbox_frac,
+                    paper_id,
+                    q_key,
+                    page_urls[page_idx],
+                )
+                diagram_status = "ok" if diagram_ok else "failed"
+            else:
+                image_url = page_urls[page_idx]
+                diagram_status = "failed"
+                logger.warning(
+                    "Question %d (%s) has_image=True but no valid bbox",
+                    q_idx, q.get("question_number")
+                )
+
+        review_reasons = _validate_extracted_rows([q])
+        if diagram_status == "failed":
+            review_reasons.append("diagram_failed_to_crop")
+
+        confidence = _compute_confidence(q)
+        if confidence < 0.6:
+            review_reasons.append(f"low_confidence:{confidence:.2f}")
+            low_confidence_count += 1
+
+        needs_review = len(review_reasons) > 0
+        auto_hidden = needs_review
+
+        db_rows.append({
+            "paper_id": paper_id,
+            "subject_id": subject_id,
+            "question_number": str(q.get("question_number", "")),
+            "sub_question": q.get("sub_question"),
+            "section": q.get("section"),
+            "marks": int(q.get("marks", 0)),
+            "text": _sanitise_question_text(str(q.get("text", ""))),
+            "has_image": has_image,
+            "image_url": image_url,
+            "diagram_status": diagram_status,
+            "topic_tags": q.get("topic_tags", []),
+            "question_type": q.get("question_type", "written"),
+            "mcq_options": q.get("mcq_options"),
+            "needs_review": needs_review,
+            "review_reasons": review_reasons,
+            "hidden": auto_hidden,
+            "_correct_option": q.get("correct_option"),
+        })
+
+    return db_rows, low_confidence_count
+
+
+def _replace_paper_questions(
+    *,
+    supabase: Any,
+    paper_id: str,
+    db_rows: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    existing = supabase.table("question").select("id").eq("paper_id", paper_id).execute()
+    existing_ids = [row["id"] for row in (existing.data or []) if row.get("id")]
+    if existing_ids:
+        supabase.table("mcq_answer").delete().in_("question_id", existing_ids).execute()
+        supabase.table("question").delete().eq("paper_id", paper_id).execute()
+
+    if not db_rows:
+        return []
+
+    correct_options = {i: r.pop("_correct_option", None) for i, r in enumerate(db_rows)}
+    result = supabase.table("question").insert(db_rows).execute()
+    inserted = result.data or []
+
+    mcq_answer_rows = []
+    for i, inserted_q in enumerate(inserted):
+        correct = correct_options.get(i)
+        if correct and correct in ("A", "B", "C", "D"):
+            mcq_answer_rows.append({
+                "question_id": inserted_q["id"],
+                "correct_option": correct,
+            })
+    if mcq_answer_rows:
+        supabase.table("mcq_answer").insert(mcq_answer_rows).execute()
+        logger.info("Stored %d MCQ answer keys for paper %s", len(mcq_answer_rows), paper_id)
+
+    answered_indices = {i for i, correct in correct_options.items() if correct in ("A", "B", "C", "D")}
+    mcq_missing_answers: list[dict[str, Any]] = []
+    for i, inserted_q in enumerate(inserted):
+        if db_rows[i].get("question_type") == "mcq" and i not in answered_indices:
+            mcq_missing_answers.append({
+                "question_id": inserted_q["id"],
+                "text": db_rows[i].get("text", ""),
+                "mcq_options": db_rows[i].get("mcq_options"),
+            })
+    if mcq_missing_answers:
+        logger.info(
+            "%d MCQ question(s) have no printed answer key — resolving via LLM for paper %s",
+            len(mcq_missing_answers), paper_id,
+        )
+        _resolve_missing_mcq_answers(paper_id, mcq_missing_answers)
+
+    return inserted
+
+
+def _update_paper_status(
+    *,
+    supabase: Any,
+    paper_id: str,
+    db_rows: list[dict[str, Any]],
+    validation_issues: list[str],
+    hallucination_warnings: list[str],
+    post_gaps: list[str],
+    low_confidence_count: int,
+) -> None:
+    if not db_rows:
+        logger.error("Extraction produced 0 questions for paper %s", paper_id)
+        supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
+        return
+
+    review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
+    has_critical_issues = (
+        bool(validation_issues)
+        or bool(hallucination_warnings)
+        or bool(post_gaps)
+        or low_confidence_count > len(db_rows) * 0.3
+    )
+
+    if has_critical_issues:
+        supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
+        logger.warning(
+            "Paper %s marked needs_review — validation=%d, hallucinations=%d, gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
+            paper_id,
+            len(validation_issues),
+            len(hallucination_warnings),
+            len(post_gaps),
+            low_confidence_count,
+            len(db_rows),
+            review_flagged,
+            len(db_rows),
+        )
+    else:
+        supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
+
+    logger.info(
+        "Extraction complete for paper %s — %d questions inserted (%d flagged for review)",
+        paper_id,
+        len(db_rows),
+        review_flagged,
+    )
+
+
+def _run_async_verification(
+    *,
+    paper_id: str,
+    subject_id: str,
+    pdf_bytes: bytes,
+    page_images: list[bytes],
+    mime_type: str,
+    page_urls: list[str | None],
+    nested_questions: list[dict[str, Any]],
+    total_pages: int,
+) -> None:
+    try:
+        verified_questions = _verify_extraction(page_images, mime_type, nested_questions)
+        if not verified_questions or verified_questions == nested_questions:
+            logger.info("Async verification made no changes for paper %s", paper_id)
+            return
+
+        validation_issues = _validate_question_numbers(verified_questions, total_pages)
+        hallucination_warnings = _detect_hallucinations(verified_questions)
+        post_gaps = _detect_sequence_gaps(verified_questions)
+        all_rows = _flatten_questions(verified_questions)
+        db_rows, low_confidence_count = _build_db_rows(
+            all_rows=all_rows,
+            page_urls=page_urls,
+            pdf_bytes=pdf_bytes,
+            paper_id=paper_id,
+            subject_id=subject_id,
+        )
+
+        supabase = get_supabase()
+        _replace_paper_questions(supabase=supabase, paper_id=paper_id, db_rows=db_rows)
+        _update_paper_status(
+            supabase=supabase,
+            paper_id=paper_id,
+            db_rows=db_rows,
+            validation_issues=validation_issues,
+            hallucination_warnings=hallucination_warnings,
+            post_gaps=post_gaps,
+            low_confidence_count=low_confidence_count,
+        )
+        logger.info("Async verification updated stored questions for paper %s", paper_id)
+    except Exception as exc:
+        logger.warning("Async verification failed for paper %s: %s", paper_id, exc)
+
+
 # ── Main Pipeline ────────────────────────────────────────────────────────
 
 def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
@@ -1447,6 +1726,10 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         pages_with_images = _detect_pages_with_images(doc)
         low_density_pages = _detect_low_text_density_pages(doc)
         doc.close()
+
+        force_batch_mode = total_pages > 20
+        if force_batch_mode:
+            logger.info("Large paper safeguard enabled for paper %s: %d pages", paper_id, total_pages)
 
         page_images, mime_type = _render_pages(pdf_bytes, is_scanned)
         logger.info("Rendered %d enhanced pages for paper %s (DPI=200)", len(page_images), paper_id)
@@ -1491,6 +1774,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         nested_questions = _parse_questions_from_pages(
             page_images, mime_type, embedded_texts,
             pre_detection_context=pre_detection_context,
+            force_batch_mode=force_batch_mode,
         )
         logger.info(
             "Phase 2 extracted %d main questions for paper %s",
@@ -1512,27 +1796,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 paper_id, "\n  • ".join(pre_verification_issues),
             )
 
-        # ── Phase 3: Verification pass (uses Flash for model diversity) ─
-        if nested_questions:
-            if not seq_gaps and not pre_verification_issues:
-                logger.info(
-                    "Skipping verification pass — no sequence gaps or validation issues detected"
-                )
-            elif len(page_images) <= _MAX_PAGES_PER_CALL:
-                nested_questions = _verify_extraction(
-                    page_images, mime_type, nested_questions
-                )
-                logger.info(
-                    "Phase 3 verified: %d main questions for paper %s",
-                    len(nested_questions), paper_id,
-                )
-            else:
-                logger.info(
-                    "Skipping verification pass — %d pages exceeds single-call limit",
-                    len(page_images),
-                )
-
-        # ── Phase 4: Flatten, validate, store ───────────────────────────
+        # ── Phase 3: Store immediately, verify asynchronously ───────────
 
         # Comprehensive validation (gaps + duplicates + count heuristic)
         validation_issues = _validate_question_numbers(nested_questions, total_pages)
@@ -1555,75 +1819,13 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         all_rows = _flatten_questions(nested_questions)
         logger.info("Flattened into %d total parts for paper %s", len(all_rows), paper_id)
 
-        # Process diagrams and finalize rows
-        db_rows = []
-        low_confidence_count = 0
-        for q_idx, q in enumerate(all_rows):
-            page_num = int(q.get("page_number", 1))
-            page_idx = max(0, min(page_num - 1, len(page_urls) - 1))
-            has_image = bool(q.get("has_image", False))
-            image_url = None
-            diagram_status = "ok"
-
-            if has_image:
-                bbox_frac = q.get("image_bbox")
-                if (
-                    isinstance(bbox_frac, list)
-                    and len(bbox_frac) == 4
-                    and all(isinstance(v, (int, float)) for v in bbox_frac)
-                    and bbox_frac[0] < bbox_frac[2]
-                    and bbox_frac[1] < bbox_frac[3]
-                ):
-                    q_key = f"q{q_idx:04d}_p{page_idx:04d}"
-                    image_url, diagram_ok = _process_diagram(
-                        pdf_bytes,
-                        page_idx,
-                        bbox_frac,
-                        paper_id,
-                        q_key,
-                        page_urls[page_idx],
-                    )
-                    diagram_status = "ok" if diagram_ok else "failed"
-                else:
-                    image_url = page_urls[page_idx]
-                    diagram_status = "failed"
-                    logger.warning(
-                        "Question %d (%s) has_image=True but no valid bbox",
-                        q_idx, q.get("question_number")
-                    )
-
-            review_reasons = _validate_extracted_rows([q])
-            if diagram_status == "failed":
-                review_reasons.append("diagram_failed_to_crop")
-
-            # Confidence scoring — flag low-confidence questions for review
-            confidence = _compute_confidence(q)
-            if confidence < 0.6:
-                review_reasons.append(f"low_confidence:{confidence:.2f}")
-                low_confidence_count += 1
-
-            needs_review = len(review_reasons) > 0
-            auto_hidden = needs_review
-
-            db_rows.append({
-                "paper_id": paper_id,
-                "subject_id": subject_id,
-                "question_number": str(q.get("question_number", "")),
-                "sub_question": q.get("sub_question"),
-                "section": q.get("section"),
-                "marks": int(q.get("marks", 0)),
-                "text": _sanitise_question_text(str(q.get("text", ""))),
-                "has_image": has_image,
-                "image_url": image_url,
-                "diagram_status": diagram_status,
-                "topic_tags": q.get("topic_tags", []),
-                "question_type": q.get("question_type", "written"),
-                "mcq_options": q.get("mcq_options"),
-                "needs_review": needs_review,
-                "review_reasons": review_reasons,
-                "hidden": auto_hidden,
-                "_correct_option": q.get("correct_option"),
-            })
+        db_rows, low_confidence_count = _build_db_rows(
+            all_rows=all_rows,
+            page_urls=page_urls,
+            pdf_bytes=pdf_bytes,
+            paper_id=paper_id,
+            subject_id=subject_id,
+        )
 
         if low_confidence_count:
             logger.warning(
@@ -1638,79 +1840,45 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             return
 
         if db_rows:
-            correct_options = {i: r.pop("_correct_option", None) for i, r in enumerate(db_rows)}
-            result = supabase.table("question").insert(db_rows).execute()
-
-            inserted = result.data or []
-            mcq_answer_rows = []
-            for i, inserted_q in enumerate(inserted):
-                correct = correct_options.get(i)
-                if correct and correct in ("A", "B", "C", "D"):
-                    mcq_answer_rows.append({
-                        "question_id": inserted_q["id"],
-                        "correct_option": correct,
-                    })
-            if mcq_answer_rows:
-                supabase.table("mcq_answer").insert(mcq_answer_rows).execute()
-                logger.info(
-                    "Stored %d MCQ answer keys from paper for paper %s",
-                    len(mcq_answer_rows), paper_id,
-                )
-
-            # Resolve missing MCQ answers via LLM
-            answered_indices = {
-                i for i, correct in correct_options.items()
-                if correct in ("A", "B", "C", "D")
-            }
-            mcq_missing_answers: list[dict[str, Any]] = []
-            for i, inserted_q in enumerate(inserted):
-                if db_rows[i].get("question_type") == "mcq" and i not in answered_indices:
-                    mcq_missing_answers.append({
-                        "question_id": inserted_q["id"],
-                        "text": db_rows[i].get("text", ""),
-                        "mcq_options": db_rows[i].get("mcq_options"),
-                    })
-            if mcq_missing_answers:
-                logger.info(
-                    "%d MCQ question(s) have no printed answer key — resolving via LLM for paper %s",
-                    len(mcq_missing_answers), paper_id,
-                )
-                _resolve_missing_mcq_answers(paper_id, mcq_missing_answers)
+            _replace_paper_questions(supabase=supabase, paper_id=paper_id, db_rows=db_rows)
 
         # Persist PDF hash for future duplicate detection
         _store_pdf_hash(paper_id, pdf_hash)
 
-        # Mark paper ready, needs_review, or error
-        if not db_rows:
-            logger.error("Extraction produced 0 questions for paper %s", paper_id)
-            supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
-            return
-
-        # Decide paper-level status using all available signals
-        review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
-        has_critical_issues = (
-            bool(validation_issues)
-            or bool(hallucination_warnings)
-            or bool(post_gaps)
-            or low_confidence_count > len(db_rows) * 0.3
+        _update_paper_status(
+            supabase=supabase,
+            paper_id=paper_id,
+            db_rows=db_rows,
+            validation_issues=validation_issues,
+            hallucination_warnings=hallucination_warnings,
+            post_gaps=post_gaps,
+            low_confidence_count=low_confidence_count,
         )
 
-        if has_critical_issues:
-            supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
-            logger.warning(
-                "Paper %s marked needs_review — validation=%d, hallucinations=%d, "
-                "gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
-                paper_id, len(validation_issues), len(hallucination_warnings),
-                len(post_gaps), low_confidence_count, len(db_rows),
-                review_flagged, len(db_rows),
+        should_verify_async = (
+            bool(nested_questions)
+            and bool(seq_gaps or pre_verification_issues)
+            and len(page_images) <= _MAX_PAGES_PER_CALL
+        )
+        if should_verify_async:
+            thread = threading.Thread(
+                target=_run_async_verification,
+                kwargs={
+                    "paper_id": paper_id,
+                    "subject_id": subject_id,
+                    "pdf_bytes": pdf_bytes,
+                    "page_images": page_images,
+                    "mime_type": mime_type,
+                    "page_urls": page_urls,
+                    "nested_questions": nested_questions,
+                    "total_pages": total_pages,
+                },
+                daemon=True,
             )
-        else:
-            supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
-
-        logger.info(
-            "Extraction complete for paper %s — %d questions inserted (%s PDF, %d flagged for review)",
-            paper_id, len(db_rows), "scanned" if is_scanned else "digital", review_flagged,
-        )
+            thread.start()
+            logger.info("Async verification queued for paper %s", paper_id)
+        elif nested_questions:
+            logger.info("Async verification skipped for paper %s", paper_id)
 
     except Exception as exc:
         logger.error("Extraction failed for paper %s: %s", paper_id, exc, exc_info=True)

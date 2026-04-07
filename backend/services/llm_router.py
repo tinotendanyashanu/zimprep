@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
@@ -17,6 +18,12 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_MODEL_TYPES = {"extraction", "verification", "mcq"}
 _MAX_ATTEMPTS_PER_PROVIDER = 2
+_MAX_PROVIDER_OUTPUT_TOKENS = 8000
+_CIRCUIT_BREAKER_THRESHOLD = 3
+_CIRCUIT_BREAKER_COOLDOWN_SECONDS = 60
+_provider_failures: dict[str, int] = {}
+_provider_disabled_until: dict[str, float] = {}
+_provider_state_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -74,7 +81,7 @@ def normalize_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
             except (TypeError, ValueError):
                 max_tokens = 4000
 
-        max_tokens = max(1, min(max_tokens, 16000))
+        max_tokens = max(1, min(max_tokens, _MAX_PROVIDER_OUTPUT_TOKENS))
         normalized = {
             "max_tokens": max_tokens,
             "temperature": config.get("temperature", 0.2),
@@ -87,8 +94,15 @@ def normalize_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
         return normalized
 
     if provider == "gemini":
+        max_output_tokens = config.get("max_output_tokens", _MAX_PROVIDER_OUTPUT_TOKENS)
+        if not isinstance(max_output_tokens, int):
+            try:
+                max_output_tokens = int(max_output_tokens)
+            except (TypeError, ValueError):
+                max_output_tokens = _MAX_PROVIDER_OUTPUT_TOKENS
+
         normalized = {
-            "max_output_tokens": config.get("max_output_tokens", 20000),
+            "max_output_tokens": max(1, min(max_output_tokens, _MAX_PROVIDER_OUTPUT_TOKENS)),
             "thinking_config": config.get("thinking_config"),
         }
         logger.info(
@@ -101,23 +115,33 @@ def normalize_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
     return dict(config)
 
 
-def call_llm(model_type: str, contents: list, system_instruction: str, config: dict):
+def call_llm(
+    model_type: str,
+    contents: list,
+    system_instruction: str,
+    config: dict,
+    task_type: str | None = None,
+):
     """
     Route an LLM call through the configured provider chain.
 
     Rules:
       - 503 / unavailable / overloaded: no retry, immediate fallback
       - 429 / rate limit: one retry, then fallback
-      - timeout / connection: one retry, then fallback
+      - timeout / connection: immediate fallback
       - other errors: fail immediately
     """
-    if model_type not in _SUPPORTED_MODEL_TYPES:
-        raise ValueError(f"Unsupported model_type: {model_type}")
+    resolved_task_type = task_type or (config or {}).get("task_type", model_type)
+    if resolved_task_type not in _SUPPORTED_MODEL_TYPES:
+        raise ValueError(f"Unsupported model_type: {resolved_task_type}")
 
     last_fallback_error: Exception | None = None
-    provider_chain = _get_provider_chain(model_type, config or {})
+    provider_chain = _get_provider_chain(resolved_task_type, config or {})
 
     for provider_spec in provider_chain:
+        if _is_provider_disabled(provider_spec.name):
+            logger.warning("Skipping %s due to circuit breaker", provider_spec.name)
+            continue
         try:
             response = _call_provider_with_policy(
                 provider_spec=provider_spec,
@@ -127,7 +151,7 @@ def call_llm(model_type: str, contents: list, system_instruction: str, config: d
             )
             logger.info(
                 "LLM routing success: model_type=%s provider_used=%s model=%s",
-                model_type,
+                resolved_task_type,
                 provider_spec.name,
                 provider_spec.model,
             )
@@ -141,28 +165,60 @@ def call_llm(model_type: str, contents: list, system_instruction: str, config: d
 
 def _get_provider_chain(model_type: str, config: dict[str, Any]) -> tuple[_ProviderSpec, ...]:
     chain = _PROVIDER_CHAIN[model_type]
+    gemini_flash = next((spec for spec in chain if spec.model == "gemini-2.5-flash"), None)
+    gemini_pro = next((spec for spec in chain if spec.model == "gemini-2.5-pro"), None)
+    openai = next((spec for spec in chain if spec.provider == "openai"), None)
 
-    if model_type != "extraction":
-        return chain
+    if model_type == "extraction":
+        batch_size = config.get("batch_size", config.get("batch_pages"))
+        try:
+            batch_size = int(batch_size)
+        except (TypeError, ValueError):
+            batch_size = None
 
-    batch_pages = config.get("batch_pages")
-    try:
-        batch_pages = int(batch_pages)
-    except (TypeError, ValueError):
-        batch_pages = None
+        if batch_size is not None and batch_size <= 3:
+            ordered = [gemini_flash, openai]
+            logger.info("Using Flash-first extraction chain for small batch: batch_size=%s", batch_size)
+        else:
+            ordered = [gemini_pro, gemini_flash, openai]
+        return tuple(spec for spec in ordered if spec is not None)
 
-    if batch_pages is not None and batch_pages <= 5:
-        gemini_flash = next((spec for spec in chain if spec.model == "gemini-2.5-flash"), None)
-        gemini_pro = next((spec for spec in chain if spec.model == "gemini-2.5-pro"), None)
-        if gemini_flash and gemini_pro:
-            reordered = tuple(
-                [gemini_flash, gemini_pro]
-                + [spec for spec in chain if spec not in {gemini_flash, gemini_pro}]
-            )
-            logger.info("Using Flash-first extraction chain for small batch: batch_pages=%s", batch_pages)
-            return reordered
+    if model_type in {"verification", "mcq"}:
+        return tuple(spec for spec in (gemini_flash, openai) if spec is not None)
 
     return chain
+
+
+def _is_provider_disabled(provider_name: str) -> bool:
+    now = time.monotonic()
+    with _provider_state_lock:
+        disabled_until = _provider_disabled_until.get(provider_name, 0.0)
+        if disabled_until <= now:
+            if provider_name in _provider_disabled_until:
+                _provider_disabled_until.pop(provider_name, None)
+                _provider_failures.pop(provider_name, None)
+            return False
+        return True
+
+
+def _record_provider_success(provider_name: str) -> None:
+    with _provider_state_lock:
+        _provider_failures[provider_name] = 0
+        _provider_disabled_until.pop(provider_name, None)
+
+
+def _record_provider_failure(provider_name: str) -> None:
+    now = time.monotonic()
+    with _provider_state_lock:
+        failures = _provider_failures.get(provider_name, 0) + 1
+        _provider_failures[provider_name] = failures
+        if failures >= _CIRCUIT_BREAKER_THRESHOLD:
+            _provider_disabled_until[provider_name] = now + _CIRCUIT_BREAKER_COOLDOWN_SECONDS
+            logger.warning(
+                "Circuit breaker opened for %s after %d consecutive failures",
+                provider_name,
+                failures,
+            )
 
 
 def _call_provider_with_policy(
@@ -203,11 +259,13 @@ def _call_provider_with_policy(
                 attempt,
                 elapsed,
             )
+            _record_provider_success(provider_spec.name)
             return response
         except Exception as exc:
             elapsed = time.monotonic() - started_at
             category = _classify_error(exc)
             reason = _describe_error(category, exc)
+            _record_provider_failure(provider_spec.name)
 
             if category == "unavailable":
                 logger.warning(
@@ -219,7 +277,7 @@ def _call_provider_with_policy(
                 )
                 raise _ProviderFallback(exc) from exc
 
-            if category in {"rate_limit", "timeout"} and attempt < _MAX_ATTEMPTS_PER_PROVIDER:
+            if category == "rate_limit" and attempt < _MAX_ATTEMPTS_PER_PROVIDER:
                 logger.warning(
                     "%s failed (%s) on attempt %d in %.2fs -> retrying once",
                     provider_spec.name,
@@ -229,7 +287,7 @@ def _call_provider_with_policy(
                 )
                 continue
 
-            if category in {"rate_limit", "timeout"}:
+            if category in {"rate_limit", "timeout", "unavailable"}:
                 logger.warning(
                     "%s failed (%s) on attempt %d in %.2fs -> switching provider",
                     provider_spec.name,
