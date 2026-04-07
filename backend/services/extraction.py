@@ -33,6 +33,13 @@ from google import genai
 from google.genai import types
 from PIL import Image, ImageEnhance, ImageFilter
 
+try:
+    import cv2
+    import numpy as np
+    _HAS_CV2 = True
+except ImportError:
+    _HAS_CV2 = False
+
 from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
@@ -102,10 +109,71 @@ def _extract_embedded_text(doc: fitz.Document) -> list[str]:
     return texts
 
 
+def _deskew_image(img: Image.Image) -> Image.Image:
+    """
+    Detect and correct skew in scanned/phone-captured images using OpenCV.
+    Only corrects skew between 0.5° and 15° — beyond that is likely a layout
+    issue, not camera tilt.  Falls back to the original image if OpenCV is
+    unavailable or detection fails.
+    """
+    if not _HAS_CV2:
+        return img
+
+    try:
+        gray = np.array(img.convert("L"))
+        # Otsu binarisation → find text pixel coordinates
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        coords = np.column_stack(np.where(binary > 0))
+
+        if len(coords) < 200:
+            return img  # not enough content to measure skew
+
+        angle = cv2.minAreaRect(coords)[-1]
+        # minAreaRect returns angles in (-90, 0]; normalise
+        if angle < -45:
+            angle = -(90 + angle)
+        else:
+            angle = -angle
+
+        if abs(angle) < 0.5 or abs(angle) > 15:
+            return img
+
+        logger.debug("Deskewing by %.2f°", angle)
+        return img.rotate(angle, resample=Image.BICUBIC, expand=True,
+                          fillcolor=(255, 255, 255))
+    except Exception as exc:
+        logger.debug("Deskew failed (non-critical): %s", exc)
+        return img
+
+
+def _apply_clahe(img: Image.Image) -> Image.Image:
+    """
+    Apply CLAHE (Contrast Limited Adaptive Histogram Equalisation) to the
+    luminance channel.  This handles uneven lighting from phone cameras far
+    better than a global contrast multiplier.
+    """
+    if not _HAS_CV2:
+        # Fallback: simple global auto-contrast via PIL
+        enhancer = ImageEnhance.Contrast(img)
+        return enhancer.enhance(1.5)
+
+    try:
+        img_np = np.array(img.convert("RGB"))
+        lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+        result = cv2.cvtColor(lab, cv2.COLOR_LAB2RGB)
+        return Image.fromarray(result)
+    except Exception as exc:
+        logger.debug("CLAHE failed (non-critical): %s", exc)
+        enhancer = ImageEnhance.Contrast(img)
+        return enhancer.enhance(1.5)
+
+
 def _enhance_image(img_bytes: bytes, is_scanned: bool) -> bytes:
     """
     Enhance image quality for better AI extraction.
-    For scanned/phone-captured PDFs: auto-contrast, sharpen, denoise.
+    For scanned/phone-captured PDFs: deskew, CLAHE, sharpen, denoise.
     For born-digital: light sharpening only.
     """
     img = Image.open(BytesIO(img_bytes))
@@ -115,19 +183,21 @@ def _enhance_image(img_bytes: bytes, is_scanned: bool) -> bytes:
         if img.mode != "RGB":
             img = img.convert("RGB")
 
-        # 1. Auto-contrast enhancement — makes text stand out from background
-        enhancer = ImageEnhance.Contrast(img)
-        img = enhancer.enhance(1.5)
+        # 1. Deskew — correct phone camera tilt (NEW)
+        img = _deskew_image(img)
 
-        # 2. Brightness normalization — phone scans are often too dark/light
+        # 2. Adaptive contrast (CLAHE) — handles uneven phone lighting (IMPROVED)
+        img = _apply_clahe(img)
+
+        # 3. Brightness normalization — phone scans are often too dark/light
         enhancer = ImageEnhance.Brightness(img)
         img = enhancer.enhance(1.1)
 
-        # 3. Sharpening — critical for phone camera blur
+        # 4. Sharpening — critical for phone camera blur
         enhancer = ImageEnhance.Sharpness(img)
         img = enhancer.enhance(2.0)
 
-        # 4. Light denoise — reduces phone camera noise without losing text
+        # 5. Light denoise — reduces phone camera noise without losing text
         img = img.filter(ImageFilter.MedianFilter(size=3))
 
         # Save as PNG (lossless) for scanned docs — no double-compression
@@ -170,6 +240,116 @@ def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]
 
     doc.close()
     return pages, mime
+
+
+# ── Pre-detection helpers ──────────────────────────────────────────────
+
+# Regex patterns for question number detection
+_Q_BOUNDARY_RE = re.compile(
+    r'(?:^|\n)\s*'
+    r'(?:'
+    r'(?:Q(?:uestion)?)\s*(\d{1,3})'      # Q1, Question 1
+    r'|(\d{1,3})\s*[.)]\s+[A-Z]'          # 1. State..., 1) Calculate...
+    r')'
+    , re.IGNORECASE,
+)
+
+_SECTION_RE = re.compile(
+    r'(?:^|\n)\s*(?:SECTION|Part)\s+([A-Z])\b', re.IGNORECASE,
+)
+
+
+def _detect_question_boundaries(texts: list[str]) -> str:
+    """
+    Regex-based scan of embedded/OCR text for question numbers and sections.
+    Returns a hint string to prepend to the LLM prompt so it knows what to
+    expect — this dramatically reduces missed questions because the LLM has
+    a checklist to verify against.
+    """
+    if not texts:
+        return ""
+
+    boundaries: list[str] = []
+    sections: list[str] = []
+    seen_questions: set[str] = set()
+
+    for page_idx, text in enumerate(texts):
+        if not text:
+            continue
+
+        # Detect sections
+        for m in _SECTION_RE.finditer(text):
+            sec = m.group(1).upper()
+            if sec not in {s.split()[-1] for s in sections}:
+                sections.append(f"Section {sec} starts on page {page_idx + 1}")
+
+        # Detect question numbers
+        for m in _Q_BOUNDARY_RE.finditer(text):
+            q_num = m.group(1) or m.group(2)
+            if q_num and q_num not in seen_questions:
+                seen_questions.add(q_num)
+                boundaries.append(
+                    f"Question {q_num} detected on page {page_idx + 1}"
+                )
+
+    if not boundaries and not sections:
+        return ""
+
+    parts = []
+    if sections:
+        parts.append("SECTIONS DETECTED:\n" + "\n".join(sections))
+    if boundaries:
+        parts.append(
+            "QUESTION BOUNDARIES DETECTED (use as checklist — "
+            "extract ALL of these):\n" + "\n".join(sorted(
+                boundaries, key=lambda s: int(re.search(r'\d+', s).group())
+            ))
+        )
+    return "\n\n".join(parts) + "\n\n"
+
+
+def _detect_pages_with_images(doc: fitz.Document) -> list[int]:
+    """
+    Use PyMuPDF to detect which pages contain embedded images (diagrams,
+    graphs, photos).  Returns 1-based page numbers.
+    This gives the LLM a heads-up about which pages have diagrams so it
+    doesn't miss them.
+    """
+    pages_with_images: list[int] = []
+    for i in range(len(doc)):
+        try:
+            images = doc[i].get_images(full=True)
+            # Filter out tiny images (likely watermarks or artifacts)
+            significant = [
+                img for img in images
+                if img[2] > 50 and img[3] > 50  # width > 50px AND height > 50px
+            ]
+            if significant:
+                pages_with_images.append(i + 1)
+        except Exception:
+            pass
+    return pages_with_images
+
+
+def _build_pre_detection_context(
+    embedded_texts: list[str] | None,
+    pages_with_images: list[int],
+) -> str:
+    """Combine boundary hints and diagram hints into a context string."""
+    parts: list[str] = []
+
+    boundary_hints = _detect_question_boundaries(embedded_texts or [])
+    if boundary_hints:
+        parts.append(boundary_hints)
+
+    if pages_with_images:
+        parts.append(
+            "PAGES WITH DIAGRAMS/IMAGES (ensure has_image=true for questions on these pages):\n"
+            + ", ".join(f"Page {p}" for p in pages_with_images)
+            + "\n\n"
+        )
+
+    return "".join(parts)
 
 
 # ── Phase 2: Full-Document Extraction ────────────────────────────────────
@@ -287,6 +467,7 @@ def _call_gemini_extract(
     page_offset: int,
     mime_type: str,
     embedded_texts: list[str] | None = None,
+    pre_detection_context: str = "",
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Send page images to Gemini with thinking ENABLED for accurate extraction.
@@ -295,6 +476,11 @@ def _call_gemini_extract(
     client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
 
     parts: list[Any] = []
+
+    # Pre-detection hints (question boundaries + diagram pages) — gives the
+    # LLM a checklist so it doesn't miss questions
+    if pre_detection_context:
+        parts.append(pre_detection_context)
 
     # If we have embedded text, provide it as supplementary context
     if embedded_texts:
@@ -342,24 +528,57 @@ def _call_gemini_extract(
     return _recover_partial_json_array(raw), hit_limit
 
 
+_OVERLAP_PAGES = 2  # pages to overlap between batches for cross-page questions
+
+
+def _dedup_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    Remove duplicate questions that appear in overlapping batch windows.
+    Keeps the version with longer text (more complete extraction).
+    """
+    seen: dict[str, dict[str, Any]] = {}  # key → question dict
+    for q in questions:
+        q_num = str(q.get("question_number", ""))
+        section = q.get("section") or ""
+        key = f"{section}:{q_num}"
+
+        if key in seen:
+            # Keep the version with more text (more complete)
+            existing_len = len(str(seen[key].get("text", "")))
+            new_len = len(str(q.get("text", "")))
+            # Also consider sub_parts count
+            existing_subs = len(seen[key].get("sub_parts") or [])
+            new_subs = len(q.get("sub_parts") or [])
+            if new_len > existing_len or new_subs > existing_subs:
+                seen[key] = q
+        else:
+            seen[key] = q
+
+    return list(seen.values())
+
+
 def _parse_questions_from_pages(
     page_images: list[bytes],
     mime_type: str,
     embedded_texts: list[str] | None = None,
+    pre_detection_context: str = "",
 ) -> list[dict[str, Any]]:
     """
     Extract questions from all pages using Gemini with full paper context.
 
     Sends all pages together when possible (up to _MAX_PAGES_PER_CALL).
     Falls back to splitting if token limits are hit.
+    Uses overlapping page windows to catch cross-page questions at batch
+    boundaries.
     """
     results: list[dict[str, Any]] = []
     i = 0
     batch_size = min(len(page_images), _MAX_PAGES_PER_CALL)
 
     while i < len(page_images):
-        batch = page_images[i: i + batch_size]
-        batch_texts = embedded_texts[i: i + batch_size] if embedded_texts else None
+        end = min(i + batch_size, len(page_images))
+        batch = page_images[i:end]
+        batch_texts = embedded_texts[i:end] if embedded_texts else None
 
         try:
             questions, hit_limit = _call_gemini_extract(
@@ -367,14 +586,11 @@ def _parse_questions_from_pages(
                 page_offset=i,
                 mime_type=mime_type,
                 embedded_texts=batch_texts,
+                pre_detection_context=pre_detection_context,
             )
         except Exception as exc:
-            # _gemini_call_with_retry already retried transient errors 6 times.
-            # If we still fail, raise to abort the whole extraction so the paper
-            # gets status="error" and the admin can re-extract later — never
-            # silently skip pages which would produce an incomplete question set.
             raise RuntimeError(
-                f"Extraction failed for pages {i+1}–{i+len(batch)} after all retries: {exc}"
+                f"Extraction failed for pages {i+1}–{end} after all retries: {exc}"
             ) from exc
 
         if hit_limit and batch_size > 1:
@@ -387,10 +603,15 @@ def _parse_questions_from_pages(
 
         logger.info(
             "Pages %d–%d: extracted %d questions (batch_size=%d)",
-            i + 1, i + len(batch), len(questions), batch_size,
+            i + 1, end, len(questions), batch_size,
         )
         results.extend(questions)
-        i += len(batch)
+
+        # Advance with overlap to catch cross-page questions at boundaries
+        advance = len(batch)
+        if end < len(page_images) and advance > _OVERLAP_PAGES:
+            advance -= _OVERLAP_PAGES
+        i += advance
 
         # Try to grow batch size back up after successful smaller batch
         if not hit_limit and batch_size < _MAX_PAGES_PER_CALL:
@@ -398,6 +619,14 @@ def _parse_questions_from_pages(
 
         if i < len(page_images):
             time.sleep(1)
+
+    # Dedup questions from overlapping windows
+    if len(page_images) > _MAX_PAGES_PER_CALL:
+        before = len(results)
+        results = _dedup_questions(results)
+        if len(results) < before:
+            logger.info("Dedup removed %d duplicate questions from overlapping batches",
+                        before - len(results))
 
     return results
 
@@ -655,12 +884,90 @@ def _validate_extracted_rows(rows: list[dict[str, Any]]) -> list[str]:
             reasons.append(f"{q_label}: Missing text and diagram")
         if row.get("question_type") == "mcq" and not row.get("mcq_options"):
             reasons.append(f"{q_label}: MCQ missing options")
+        if row.get("question_type") == "mcq":
+            opts = row.get("mcq_options") or []
+            if isinstance(opts, list) and 0 < len(opts) < 3:
+                reasons.append(f"{q_label}: MCQ has only {len(opts)} options (expected 3-5)")
         if row.get("has_image") and not row.get("image_bbox"):
             reasons.append(f"{q_label}: Diagram flagged but missing bbox")
         if len(str(row.get("text", ""))) < 10 and not row.get("has_image"):
             reasons.append(f"{q_label}: Text suspiciously short")
 
     return reasons
+
+
+def _detect_sequence_gaps(nested_questions: list[dict[str, Any]]) -> list[str]:
+    """
+    Check for missing question numbers in the extracted sequence.
+    E.g. if we have Q1, Q2, Q4 → flag that Q3 is missing.
+    Returns list of warning strings.
+    """
+    nums: list[int] = []
+    for q in nested_questions:
+        try:
+            nums.append(int(q.get("question_number", 0)))
+        except (ValueError, TypeError):
+            continue
+
+    if not nums:
+        return []
+
+    nums_sorted = sorted(set(nums))
+    gaps = []
+    for i in range(len(nums_sorted) - 1):
+        expected_next = nums_sorted[i] + 1
+        actual_next = nums_sorted[i + 1]
+        if actual_next > expected_next:
+            missing = list(range(expected_next, actual_next))
+            gaps.append(
+                f"Missing question(s) {', '.join(str(m) for m in missing)} "
+                f"between Q{nums_sorted[i]} and Q{nums_sorted[i+1]}"
+            )
+    return gaps
+
+
+def _compute_confidence(row: dict[str, Any]) -> float:
+    """
+    Compute extraction confidence score 0.0–1.0 for a single flattened row.
+    Factors: text length, marks presence, structural validity, MCQ completeness.
+    Used to determine needs_review threshold.
+    """
+    score = 1.0
+
+    text = str(row.get("text", ""))
+    text_len = len(text)
+
+    # Very short text (< 20 chars) is suspicious unless it's a diagram-only question
+    if text_len < 20 and not row.get("has_image"):
+        score -= 0.4
+    elif text_len < 50:
+        score -= 0.15
+
+    # No marks assigned — might be a container row (OK) or extraction miss
+    if row.get("marks", 0) == 0 and row.get("sub_question"):
+        score -= 0.2  # Sub-questions should usually have marks
+
+    # MCQ with missing or too few options
+    if row.get("question_type") == "mcq":
+        opts = row.get("mcq_options") or []
+        if not opts:
+            score -= 0.5
+        elif len(opts) < 3:
+            score -= 0.3
+        elif len(opts) > 6:
+            score -= 0.2  # unusual — might be mis-parsed
+
+    # Diagram flagged but no bbox
+    if row.get("has_image") and not row.get("image_bbox"):
+        score -= 0.15
+
+    # Check for signs of OCR garble (high ratio of non-alpha chars)
+    if text_len > 20:
+        alpha_ratio = sum(c.isalpha() or c.isspace() for c in text) / text_len
+        if alpha_ratio < 0.4:
+            score -= 0.3  # Likely garbled text
+
+    return max(0.0, min(1.0, score))
 
 
 def _sanitise_question_text(text: str) -> str:
@@ -882,14 +1189,24 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         is_scanned = _is_scanned_pdf(doc)
         embedded_texts = _extract_embedded_text(doc) if not is_scanned else None
+
+        # Pre-detect diagram pages and question boundaries BEFORE closing doc
+        pages_with_images = _detect_pages_with_images(doc)
         doc.close()
 
+        pre_detection_context = _build_pre_detection_context(
+            embedded_texts, pages_with_images,
+        )
+
         logger.info(
-            "Paper %s: %s PDF, %s",
+            "Paper %s: %s PDF, %s, %d pages with diagrams detected",
             paper_id,
             "scanned" if is_scanned else "born-digital",
             f"{len(embedded_texts)} pages with text" if embedded_texts else "no embedded text",
+            len(pages_with_images),
         )
+        if pre_detection_context:
+            logger.info("Pre-detection context:\n%s", pre_detection_context.strip())
 
         page_images, mime_type = _render_pages(pdf_bytes, is_scanned)
         logger.info("Rendered %d enhanced pages for paper %s (DPI=200)", len(page_images), paper_id)
@@ -902,12 +1219,21 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
         # ── Phase 2: Full-document extraction ───────────────────────────
         nested_questions = _parse_questions_from_pages(
-            page_images, mime_type, embedded_texts
+            page_images, mime_type, embedded_texts,
+            pre_detection_context=pre_detection_context,
         )
         logger.info(
             "Phase 2 extracted %d main questions for paper %s",
             len(nested_questions), paper_id,
         )
+
+        # Check for sequence gaps BEFORE verification — log warnings
+        seq_gaps = _detect_sequence_gaps(nested_questions)
+        if seq_gaps:
+            logger.warning(
+                "Sequence gaps detected in paper %s (pre-verification): %s",
+                paper_id, "; ".join(seq_gaps),
+            )
 
         # ── Phase 3: Verification pass ──────────────────────────────────
         if nested_questions:
@@ -927,11 +1253,21 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 )
 
         # ── Phase 4: Flatten, validate, store ───────────────────────────
+
+        # Post-verification sequence gap check
+        post_gaps = _detect_sequence_gaps(nested_questions)
+        if post_gaps:
+            logger.warning(
+                "Sequence gaps STILL present after verification for paper %s: %s",
+                paper_id, "; ".join(post_gaps),
+            )
+
         all_rows = _flatten_questions(nested_questions)
         logger.info("Flattened into %d total parts for paper %s", len(all_rows), paper_id)
 
         # Process diagrams and finalize rows
         db_rows = []
+        low_confidence_count = 0
         for q_idx, q in enumerate(all_rows):
             page_num = int(q.get("page_number", 1))
             page_idx = max(0, min(page_num - 1, len(page_urls) - 1))
@@ -970,6 +1306,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             if diagram_status == "failed":
                 review_reasons.append("diagram_failed_to_crop")
 
+            # Confidence scoring — flag low-confidence questions for review
+            confidence = _compute_confidence(q)
+            if confidence < 0.6:
+                review_reasons.append(f"low_confidence:{confidence:.2f}")
+                low_confidence_count += 1
+
             needs_review = len(review_reasons) > 0
             auto_hidden = needs_review
 
@@ -992,6 +1334,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 "hidden": auto_hidden,
                 "_correct_option": q.get("correct_option"),
             })
+
+        if low_confidence_count:
+            logger.warning(
+                "%d/%d questions flagged as low confidence for paper %s",
+                low_confidence_count, len(db_rows), paper_id,
+            )
 
         # Check paper still exists before inserting
         paper_check = supabase.table("paper").select("id").eq("id", paper_id).execute()
@@ -1039,16 +1387,27 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 )
                 _resolve_missing_mcq_answers(paper_id, mcq_missing_answers)
 
-        # Mark paper ready or error
+        # Mark paper ready, needs_review, or error
         if not db_rows:
             logger.error("Extraction produced 0 questions for paper %s", paper_id)
             supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
             return
 
-        supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
+        # If sequence gaps exist or too many low-confidence questions, flag paper
+        review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
+        if post_gaps or (low_confidence_count > len(db_rows) * 0.3):
+            supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
+            logger.warning(
+                "Paper %s marked needs_review — gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
+                paper_id, len(post_gaps), low_confidence_count, len(db_rows),
+                review_flagged, len(db_rows),
+            )
+        else:
+            supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
+
         logger.info(
-            "Extraction complete for paper %s — %d questions inserted (%s PDF)",
-            paper_id, len(db_rows), "scanned" if is_scanned else "digital",
+            "Extraction complete for paper %s — %d questions inserted (%s PDF, %d flagged for review)",
+            paper_id, len(db_rows), "scanned" if is_scanned else "digital", review_flagged,
         )
 
     except Exception as exc:
