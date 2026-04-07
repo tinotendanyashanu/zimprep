@@ -28,6 +28,7 @@ import threading
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from difflib import SequenceMatcher
 from io import BytesIO
 from typing import Any
 
@@ -606,29 +607,69 @@ def _text_hash(text: str) -> str:
 
 
 def _dedup_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """
-    Remove duplicate questions while preserving overall question order.
-    Uses a composite key of section + question_number.
-    When duplicates exist, keeps the version with the longest text.
-    """
-    ordered: list[dict[str, Any]] = []
-    key_to_index: dict[str, int] = {}
+    cleaned: dict[str, dict[str, Any]] = {}
 
     for q in questions:
-        q_num = str(q.get("question_number", ""))
-        section = q.get("section") or ""
-        key = f"{section}:{q_num}"
-        existing_index = key_to_index.get(key)
-        if existing_index is None:
-            key_to_index[key] = len(ordered)
-            ordered.append(q)
+        q_num = str(q.get("question_number", "")).strip()
+        if not q_num:
+            continue
+        text = str(q.get("text", "")).strip()
+
+        if q_num not in cleaned:
+            cleaned[q_num] = q
             continue
 
-        existing = ordered[existing_index]
-        if len(str(q.get("text", ""))) > len(str(existing.get("text", ""))):
-            ordered[existing_index] = q
+        existing = str(cleaned[q_num].get("text", "")).strip()
+        similarity = SequenceMatcher(None, text, existing).ratio()
+        if similarity > 0.85:
+            if len(text) > len(existing):
+                cleaned[q_num] = q
+        elif len(text) > len(existing):
+            cleaned[q_num] = q
 
-    return ordered
+    return sorted(cleaned.values(), key=lambda x: str(x.get("question_number", "")))
+
+
+def _remove_similar_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    final: list[dict[str, Any]] = []
+
+    for q in questions:
+        text = str(q.get("text", "")).strip()
+        is_duplicate = False
+
+        for existing in final:
+            similarity = SequenceMatcher(
+                None,
+                text,
+                str(existing.get("text", "")).strip(),
+            ).ratio()
+            if similarity > 0.9:
+                is_duplicate = True
+                break
+
+        if not is_duplicate:
+            final.append(q)
+
+    return final
+
+
+def _deduplicate_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    deduped = _dedup_questions(questions)
+    return _remove_similar_questions(deduped)
+
+
+def _safe_update_paper_status(paper_id: str, status: str) -> None:
+    supabase = get_supabase()
+    try:
+        supabase.table("paper").update({"status": status}).eq("id", paper_id).execute()
+    except Exception as exc:
+        logger.error("[STATUS_UPDATE_FAILED] %s -> %s", status, exc)
+        if status == "failed":
+            return
+        try:
+            supabase.table("paper").update({"status": "failed"}).eq("id", paper_id).execute()
+        except Exception as inner:
+            logger.error("[STATUS_FALLBACK_FAILED] %s", inner)
 
 
 def _parse_questions_from_pages(
@@ -723,7 +764,7 @@ def _parse_questions_from_pages(
         ordered_results.extend(page_results.get(page_index, []))
 
     before = len(ordered_results)
-    results = _dedup_questions(ordered_results)
+    results = _deduplicate_questions(ordered_results)
     if len(results) < before:
         logger.info("Dedup removed %d duplicate questions", before - len(results))
     if failed_pages and len(failed_pages) < total_pages:
@@ -1391,7 +1432,7 @@ def _check_duplicate_pdf(paper_id: str, pdf_hash: str) -> bool:
             .select("id, status")
             .eq("pdf_hash", pdf_hash)
             .neq("id", paper_id)
-            .in_("status", ["clean", "needs_review"])
+            .in_("status", ["processed", "needs_review"])
             .limit(1)
             .execute()
         )
@@ -1401,10 +1442,12 @@ def _check_duplicate_pdf(paper_id: str, pdf_hash: str) -> bool:
                 "Paper %s is a duplicate of %s (same PDF hash %s) — skipping extraction",
                 paper_id, source_id, pdf_hash[:16],
             )
-            supabase.table("paper").update({
-                "status": "duplicate",
-                "pdf_hash": pdf_hash,
-            }).eq("id", paper_id).execute()
+            try:
+                supabase.table("paper").update({
+                    "pdf_hash": pdf_hash,
+                }).eq("id", paper_id).execute()
+            except Exception as exc2:
+                logger.warning("Duplicate paper hash update failed for %s: %s", paper_id, exc2)
             return True
     except Exception as exc:
         # pdf_hash column may not exist yet — that's OK, just skip caching
@@ -1554,7 +1597,6 @@ def _replace_paper_questions(
 
 def _update_paper_status(
     *,
-    supabase: Any,
     paper_id: str,
     db_rows: list[dict[str, Any]],
     validation_issues: list[str],
@@ -1564,32 +1606,20 @@ def _update_paper_status(
 ) -> None:
     if not db_rows:
         logger.error("Extraction produced 0 questions for paper %s", paper_id)
-        supabase.table("paper").update({"status": "failed"}).eq("id", paper_id).execute()
+        _safe_update_paper_status(paper_id, "failed")
         return
 
     review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
-    has_minor_issues = (
+    issues_detected = (
         bool(validation_issues)
         or bool(hallucination_warnings)
+        or bool(post_gaps)
         or review_flagged > 0
         or low_confidence_count > len(db_rows) * 0.3
     )
 
-    if post_gaps:
-        supabase.table("paper").update({"status": "partial"}).eq("id", paper_id).execute()
-        logger.warning(
-            "Paper %s marked partial — gaps=%d, validation=%d, hallucinations=%d, low_confidence=%d/%d, flagged=%d/%d",
-            paper_id,
-            len(post_gaps),
-            len(validation_issues),
-            len(hallucination_warnings),
-            low_confidence_count,
-            len(db_rows),
-            review_flagged,
-            len(db_rows),
-        )
-    elif has_minor_issues:
-        supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
+    if issues_detected:
+        _safe_update_paper_status(paper_id, "needs_review")
         logger.warning(
             "Paper %s marked needs_review — validation=%d, hallucinations=%d, low_confidence=%d/%d, flagged=%d/%d",
             paper_id,
@@ -1601,7 +1631,7 @@ def _update_paper_status(
             len(db_rows),
         )
     else:
-        supabase.table("paper").update({"status": "clean"}).eq("id", paper_id).execute()
+        _safe_update_paper_status(paper_id, "processed")
 
     logger.info(
         "Extraction complete for paper %s — %d questions inserted (%d flagged for review)",
@@ -1624,6 +1654,7 @@ def _run_async_verification(
 ) -> None:
     try:
         verified_questions = _verify_extraction(page_images, mime_type, nested_questions)
+        verified_questions = _deduplicate_questions(verified_questions)
         if not verified_questions or verified_questions == nested_questions:
             logger.info("Async verification made no changes for paper %s", paper_id)
             return
@@ -1643,7 +1674,6 @@ def _run_async_verification(
         supabase = get_supabase()
         _replace_paper_questions(supabase=supabase, paper_id=paper_id, db_rows=db_rows)
         _update_paper_status(
-            supabase=supabase,
             paper_id=paper_id,
             db_rows=db_rows,
             validation_issues=validation_issues,
@@ -1737,6 +1767,7 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             page_images, mime_type, embedded_texts,
             pre_detection_context=pre_detection_context,
         )
+        nested_questions = _deduplicate_questions(nested_questions)
         logger.info(
             "Phase 2 extracted %d main questions for paper %s",
             len(nested_questions), paper_id,
@@ -1807,7 +1838,6 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         _store_pdf_hash(paper_id, pdf_hash)
 
         _update_paper_status(
-            supabase=supabase,
             paper_id=paper_id,
             db_rows=db_rows,
             validation_issues=validation_issues,
@@ -1842,4 +1872,4 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
     except Exception as exc:
         logger.error("Extraction failed for paper %s: %s", paper_id, exc, exc_info=True)
-        supabase.table("paper").update({"status": "failed"}).eq("id", paper_id).execute()
+        _safe_update_paper_status(paper_id, "failed")
