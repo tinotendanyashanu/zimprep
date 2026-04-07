@@ -20,11 +20,13 @@ Math notation:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
 import re
 import time
+from collections import Counter
 from io import BytesIO
 from typing import Any
 
@@ -39,6 +41,12 @@ try:
     _HAS_CV2 = True
 except ImportError:
     _HAS_CV2 = False
+
+try:
+    import pytesseract
+    _HAS_TESSERACT = True
+except ImportError:
+    _HAS_TESSERACT = False
 
 from db.client import get_supabase
 
@@ -106,6 +114,34 @@ def _extract_embedded_text(doc: fitz.Document) -> list[str]:
     texts = []
     for page in doc:
         texts.append(page.get_text("text").strip())
+    return texts
+
+
+def _extract_ocr_text_from_images(page_images: list[bytes]) -> list[str]:
+    """
+    Run Tesseract OCR on rendered page images to extract text.
+    Used as supplementary context for scanned PDFs where embedded text
+    is absent.  Returns one string per page.  Fails gracefully — returns
+    empty strings if Tesseract is unavailable.
+    """
+    if not _HAS_TESSERACT:
+        logger.info("pytesseract not installed — skipping OCR fallback")
+        return [""] * len(page_images)
+
+    texts: list[str] = []
+    for i, img_bytes in enumerate(page_images):
+        try:
+            img = Image.open(BytesIO(img_bytes))
+            # Tesseract works best on grayscale
+            if img.mode != "L":
+                img = img.convert("L")
+            text = pytesseract.image_to_string(img, lang="eng", config="--psm 6")
+            texts.append(text.strip())
+        except Exception as exc:
+            logger.debug("OCR failed for page %d (non-critical): %s", i + 1, exc)
+            texts.append("")
+    ocr_chars = sum(len(t) for t in texts)
+    logger.info("OCR extracted %d total characters from %d pages", ocr_chars, len(texts))
     return texts
 
 
@@ -331,9 +367,31 @@ def _detect_pages_with_images(doc: fitz.Document) -> list[int]:
     return pages_with_images
 
 
+def _detect_low_text_density_pages(
+    doc: fitz.Document,
+    threshold_chars: int = 80,
+) -> list[int]:
+    """
+    Detect pages where extractable text is very sparse — these are likely
+    diagram-heavy, table-as-image, or map pages.  Returns 1-based page
+    numbers.  Complements _detect_pages_with_images which only finds
+    embedded image objects.
+    """
+    sparse: list[int] = []
+    for i in range(len(doc)):
+        try:
+            text = doc[i].get_text("text").strip()
+            if len(text) < threshold_chars:
+                sparse.append(i + 1)
+        except Exception:
+            pass
+    return sparse
+
+
 def _build_pre_detection_context(
     embedded_texts: list[str] | None,
     pages_with_images: list[int],
+    low_density_pages: list[int] | None = None,
 ) -> str:
     """Combine boundary hints and diagram hints into a context string."""
     parts: list[str] = []
@@ -342,10 +400,12 @@ def _build_pre_detection_context(
     if boundary_hints:
         parts.append(boundary_hints)
 
-    if pages_with_images:
+    # Merge image pages and low-density pages for diagram hints
+    diagram_pages = sorted(set(pages_with_images) | set(low_density_pages or []))
+    if diagram_pages:
         parts.append(
             "PAGES WITH DIAGRAMS/IMAGES (ensure has_image=true for questions on these pages):\n"
-            + ", ".join(f"Page {p}" for p in pages_with_images)
+            + ", ".join(f"Page {p}" for p in diagram_pages)
             + "\n\n"
         )
 
@@ -531,28 +591,56 @@ def _call_gemini_extract(
 _OVERLAP_PAGES = 2  # pages to overlap between batches for cross-page questions
 
 
+def _text_hash(text: str) -> str:
+    """Short hash of normalised text for similarity comparison."""
+    normalised = re.sub(r'\s+', ' ', text.strip().lower())
+    return hashlib.md5(normalised.encode()).hexdigest()[:12]
+
+
+def _question_score(q: dict[str, Any]) -> int:
+    """Score a question by completeness — higher is better."""
+    score = len(str(q.get("text", "")))
+    score += len(q.get("sub_parts") or []) * 200  # sub_parts are very valuable
+    score += 50 if q.get("marks", 0) > 0 else 0
+    score += 30 if q.get("topic_tags") else 0
+    return score
+
+
 def _dedup_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Remove duplicate questions that appear in overlapping batch windows.
-    Keeps the version with longer text (more complete extraction).
+    Remove duplicate questions from overlapping batch windows.
+    Uses a composite key of section + question_number.
+    When duplicates exist, keeps the version with the highest completeness
+    score (text length + sub_parts + marks + tags).
+    Also detects near-identical text via hashing to catch duplicates with
+    slightly different numbering.
     """
-    seen: dict[str, dict[str, Any]] = {}  # key → question dict
+    seen: dict[str, dict[str, Any]] = {}
+    text_hashes: dict[str, str] = {}  # text_hash → first key that had it
+
     for q in questions:
         q_num = str(q.get("question_number", ""))
         section = q.get("section") or ""
         key = f"{section}:{q_num}"
+        t_hash = _text_hash(str(q.get("text", "")))
+
+        # Check for near-identical text under a different key
+        if t_hash in text_hashes and text_hashes[t_hash] != key:
+            existing_key = text_hashes[t_hash]
+            if existing_key in seen and _question_score(q) > _question_score(seen[existing_key]):
+                del seen[existing_key]
+                seen[key] = q
+                text_hashes[t_hash] = key
+            # else: skip this duplicate
+            continue
 
         if key in seen:
-            # Keep the version with more text (more complete)
-            existing_len = len(str(seen[key].get("text", "")))
-            new_len = len(str(q.get("text", "")))
-            # Also consider sub_parts count
-            existing_subs = len(seen[key].get("sub_parts") or [])
-            new_subs = len(q.get("sub_parts") or [])
-            if new_len > existing_len or new_subs > existing_subs:
+            if _question_score(q) > _question_score(seen[key]):
                 seen[key] = q
         else:
             seen[key] = q
+            if t_hash not in text_hashes:
+                text_hashes[t_hash] = key
 
     return list(seen.values())
 
@@ -697,15 +785,18 @@ def _verify_extraction(
         "Return the complete corrected JSON array."
     )
 
+    # Use a DIFFERENT model for verification (Flash) to avoid shared blind
+    # spots with the extraction model (Pro).  Flash is faster and cheaper,
+    # and its independent perspective catches errors Pro consistently misses.
     try:
         response = _gemini_call_with_retry(
             client.models.generate_content,
-            model="gemini-2.5-pro",
+            model="gemini-2.5-flash",
             contents=parts,
             config=types.GenerateContentConfig(
                 system_instruction=VERIFICATION_SYSTEM_PROMPT,
                 max_output_tokens=65536,
-                thinking_config=types.ThinkingConfig(thinking_budget=10240),
+                thinking_config=types.ThinkingConfig(thinking_budget=8192),
             ),
         )
 
@@ -716,11 +807,11 @@ def _verify_extraction(
             added = len(verified) - len(extracted)
             if added != 0:
                 logger.info(
-                    "Verification pass adjusted question count: %d → %d (%+d)",
+                    "Verification pass (Flash) adjusted question count: %d → %d (%+d)",
                     len(extracted), len(verified), added,
                 )
             else:
-                logger.info("Verification pass confirmed %d questions", len(verified))
+                logger.info("Verification pass (Flash) confirmed %d questions", len(verified))
             return verified
         else:
             logger.warning("Verification pass returned empty — keeping original extraction")
@@ -924,6 +1015,105 @@ def _detect_sequence_gaps(nested_questions: list[dict[str, Any]]) -> list[str]:
                 f"between Q{nums_sorted[i]} and Q{nums_sorted[i+1]}"
             )
     return gaps
+
+
+def _validate_question_numbers(
+    nested_questions: list[dict[str, Any]],
+    total_pages: int,
+) -> list[str]:
+    """
+    Comprehensive question-number validation.  Returns a list of issue
+    strings — empty list means all checks passed.
+
+    Checks:
+      1. Sequence gaps  (already exists, delegated)
+      2. Duplicate question numbers
+      3. Expected minimum question count (heuristic: ~2–3 questions per page)
+    """
+    issues: list[str] = []
+
+    # ── Sequence gaps ──
+    issues.extend(_detect_sequence_gaps(nested_questions))
+
+    # ── Duplicate question numbers ──
+    nums = [str(q.get("question_number", "")) for q in nested_questions]
+    dupes = {n: c for n, c in Counter(nums).items() if c > 1 and n}
+    for num, count in sorted(dupes.items()):
+        issues.append(f"Duplicate question number Q{num} appears {count} times")
+
+    # ── Expected count heuristic ──
+    # ZIMSEC / Cambridge papers typically have 1.5–4 questions per page.
+    # A 16-page paper should have at least ~10 main questions.
+    # We use a conservative floor of 1 question per 2 pages (minimum 3).
+    min_expected = max(3, total_pages // 2)
+    actual = len(nested_questions)
+    if actual < min_expected:
+        issues.append(
+            f"Suspiciously few questions: {actual} extracted from {total_pages} pages "
+            f"(expected at least {min_expected})"
+        )
+
+    return issues
+
+
+def _detect_hallucinations(nested_questions: list[dict[str, Any]]) -> list[str]:
+    """
+    Detect signs of LLM hallucination in extracted questions.
+
+    Checks:
+      1. Duplicate question numbers (same number, different text)
+      2. Numbering that jumps erratically (e.g. 1, 2, 15, 3)
+      3. Questions with suspiciously identical text
+    """
+    warnings: list[str] = []
+
+    # ── Duplicate numbers with different text ──
+    by_num: dict[str, list[str]] = {}
+    for q in nested_questions:
+        num = str(q.get("question_number", ""))
+        text = str(q.get("text", ""))[:100]
+        by_num.setdefault(num, []).append(text)
+
+    for num, texts in by_num.items():
+        if len(texts) > 1:
+            unique_hashes = {_text_hash(t) for t in texts}
+            if len(unique_hashes) > 1:
+                warnings.append(
+                    f"Q{num}: {len(texts)} copies with DIFFERENT text — likely hallucination"
+                )
+
+    # ── Erratic numbering (non-monotonic jumps > 5) ──
+    nums: list[int] = []
+    for q in nested_questions:
+        try:
+            nums.append(int(q.get("question_number", 0)))
+        except (ValueError, TypeError):
+            continue
+
+    for i in range(1, len(nums)):
+        jump = nums[i] - nums[i - 1]
+        if jump > 5:
+            warnings.append(
+                f"Erratic numbering: Q{nums[i-1]} → Q{nums[i]} (jump of {jump})"
+            )
+        if jump < 0 and abs(jump) > 2:
+            warnings.append(
+                f"Non-monotonic numbering: Q{nums[i-1]} → Q{nums[i]}"
+            )
+
+    # ── Near-identical text across different questions ──
+    text_to_nums: dict[str, list[str]] = {}
+    for q in nested_questions:
+        h = _text_hash(str(q.get("text", "")))
+        num = str(q.get("question_number", ""))
+        text_to_nums.setdefault(h, []).append(num)
+    for h, qnums in text_to_nums.items():
+        if len(qnums) > 1:
+            warnings.append(
+                f"Questions {', '.join(f'Q{n}' for n in qnums)} have near-identical text"
+            )
+
+    return warnings
 
 
 def _compute_confidence(row: dict[str, Any]) -> float:
@@ -1171,6 +1361,58 @@ def _resolve_missing_mcq_answers(
     )
 
 
+# ── PDF Hash Caching ────────────────────────────────────────────────────
+
+def _compute_pdf_hash(pdf_bytes: bytes) -> str:
+    """SHA-256 hash of raw PDF bytes for dedup / caching."""
+    return hashlib.sha256(pdf_bytes).hexdigest()
+
+
+def _check_duplicate_pdf(paper_id: str, pdf_hash: str) -> bool:
+    """
+    Check if we already have a successfully extracted paper with the same
+    PDF content.  If so, skip re-extraction and mark this paper as a
+    duplicate.  Returns True if duplicate was found (caller should return
+    early).
+    """
+    supabase = get_supabase()
+    try:
+        existing = (
+            supabase.table("paper")
+            .select("id, status")
+            .eq("pdf_hash", pdf_hash)
+            .neq("id", paper_id)
+            .in_("status", ["ready", "needs_review"])
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            source_id = existing.data[0]["id"]
+            logger.info(
+                "Paper %s is a duplicate of %s (same PDF hash %s) — skipping extraction",
+                paper_id, source_id, pdf_hash[:16],
+            )
+            supabase.table("paper").update({
+                "status": "duplicate",
+                "pdf_hash": pdf_hash,
+            }).eq("id", paper_id).execute()
+            return True
+    except Exception as exc:
+        # pdf_hash column may not exist yet — that's OK, just skip caching
+        logger.debug("Duplicate check skipped (column may not exist): %s", exc)
+    return False
+
+
+def _store_pdf_hash(paper_id: str, pdf_hash: str) -> None:
+    """Persist the PDF hash so future uploads can detect duplicates."""
+    try:
+        get_supabase().table("paper").update(
+            {"pdf_hash": pdf_hash}
+        ).eq("id", paper_id).execute()
+    except Exception as exc:
+        logger.debug("Could not store pdf_hash (column may not exist): %s", exc)
+
+
 # ── Main Pipeline ────────────────────────────────────────────────────────
 
 def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
@@ -1185,31 +1427,49 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
     supabase = get_supabase()
 
     try:
+        # ── Phase 0: Caching / duplicate check ─────────────────────────
+        pdf_hash = _compute_pdf_hash(pdf_bytes)
+        if _check_duplicate_pdf(paper_id, pdf_hash):
+            return  # already extracted — nothing to do
+
         # ── Phase 1: Preprocessing ──────────────────────────────────────
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+        total_pages = len(doc)
         is_scanned = _is_scanned_pdf(doc)
         embedded_texts = _extract_embedded_text(doc) if not is_scanned else None
 
         # Pre-detect diagram pages and question boundaries BEFORE closing doc
         pages_with_images = _detect_pages_with_images(doc)
+        low_density_pages = _detect_low_text_density_pages(doc)
         doc.close()
-
-        pre_detection_context = _build_pre_detection_context(
-            embedded_texts, pages_with_images,
-        )
-
-        logger.info(
-            "Paper %s: %s PDF, %s, %d pages with diagrams detected",
-            paper_id,
-            "scanned" if is_scanned else "born-digital",
-            f"{len(embedded_texts)} pages with text" if embedded_texts else "no embedded text",
-            len(pages_with_images),
-        )
-        if pre_detection_context:
-            logger.info("Pre-detection context:\n%s", pre_detection_context.strip())
 
         page_images, mime_type = _render_pages(pdf_bytes, is_scanned)
         logger.info("Rendered %d enhanced pages for paper %s (DPI=200)", len(page_images), paper_id)
+
+        # OCR fallback for scanned PDFs — provides supplementary text
+        # context that the LLM can cross-reference against the images
+        if is_scanned:
+            ocr_texts = _extract_ocr_text_from_images(page_images)
+            # Use OCR text in place of embedded_texts for boundary detection
+            # and as supplementary context for the LLM
+            embedded_texts = ocr_texts
+
+        pre_detection_context = _build_pre_detection_context(
+            embedded_texts, pages_with_images,
+            low_density_pages=low_density_pages,
+        )
+
+        logger.info(
+            "Paper %s: %s PDF, %d pages, %s, %d img-pages, %d low-density-pages",
+            paper_id,
+            "scanned" if is_scanned else "born-digital",
+            total_pages,
+            f"{sum(1 for t in embedded_texts if t)} pages with text" if embedded_texts else "no text",
+            len(pages_with_images),
+            len(low_density_pages),
+        )
+        if pre_detection_context:
+            logger.info("Pre-detection context:\n%s", pre_detection_context.strip())
 
         # Upload full page images (used as fallback for diagrams)
         page_urls: list[str | None] = []
@@ -1235,9 +1495,8 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 paper_id, "; ".join(seq_gaps),
             )
 
-        # ── Phase 3: Verification pass ──────────────────────────────────
+        # ── Phase 3: Verification pass (uses Flash for model diversity) ─
         if nested_questions:
-            # Only send verification if we have a manageable number of pages
             if len(page_images) <= _MAX_PAGES_PER_CALL:
                 nested_questions = _verify_extraction(
                     page_images, mime_type, nested_questions
@@ -1254,13 +1513,23 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
         # ── Phase 4: Flatten, validate, store ───────────────────────────
 
-        # Post-verification sequence gap check
-        post_gaps = _detect_sequence_gaps(nested_questions)
-        if post_gaps:
+        # Comprehensive validation (gaps + duplicates + count heuristic)
+        validation_issues = _validate_question_numbers(nested_questions, total_pages)
+        if validation_issues:
             logger.warning(
-                "Sequence gaps STILL present after verification for paper %s: %s",
-                paper_id, "; ".join(post_gaps),
+                "Validation issues for paper %s:\n  • %s",
+                paper_id, "\n  • ".join(validation_issues),
             )
+
+        # Hallucination detection
+        hallucination_warnings = _detect_hallucinations(nested_questions)
+        if hallucination_warnings:
+            logger.warning(
+                "Possible hallucinations in paper %s:\n  • %s",
+                paper_id, "\n  • ".join(hallucination_warnings),
+            )
+
+        post_gaps = _detect_sequence_gaps(nested_questions)
 
         all_rows = _flatten_questions(nested_questions)
         logger.info("Flattened into %d total parts for paper %s", len(all_rows), paper_id)
@@ -1387,19 +1656,31 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 )
                 _resolve_missing_mcq_answers(paper_id, mcq_missing_answers)
 
+        # Persist PDF hash for future duplicate detection
+        _store_pdf_hash(paper_id, pdf_hash)
+
         # Mark paper ready, needs_review, or error
         if not db_rows:
             logger.error("Extraction produced 0 questions for paper %s", paper_id)
             supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
             return
 
-        # If sequence gaps exist or too many low-confidence questions, flag paper
+        # Decide paper-level status using all available signals
         review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
-        if post_gaps or (low_confidence_count > len(db_rows) * 0.3):
+        has_critical_issues = (
+            bool(validation_issues)
+            or bool(hallucination_warnings)
+            or bool(post_gaps)
+            or low_confidence_count > len(db_rows) * 0.3
+        )
+
+        if has_critical_issues:
             supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
             logger.warning(
-                "Paper %s marked needs_review — gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
-                paper_id, len(post_gaps), low_confidence_count, len(db_rows),
+                "Paper %s marked needs_review — validation=%d, hallucinations=%d, "
+                "gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
+                paper_id, len(validation_issues), len(hallucination_warnings),
+                len(post_gaps), low_confidence_count, len(db_rows),
                 review_flagged, len(db_rows),
             )
         else:
