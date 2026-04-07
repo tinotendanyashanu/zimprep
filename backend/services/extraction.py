@@ -279,6 +279,70 @@ def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]
     return pages, mime
 
 
+# ── Layout-aware filtering ─────────────────────────────────────────────
+
+_PAGE_NUM_ISOLATED_RE = re.compile(r'^\s*\d{1,3}\s*$')
+_PAGE_NUM_OF_RE = re.compile(r'^\s*\d+\s+of\s+\d+\s*$', re.IGNORECASE)
+_PAGE_NUM_DASHED_RE = re.compile(r'^\s*[-–—]?\s*\d{1,3}\s*[-–—]?\s*$')
+_PAGE_NUM_LABEL_RE = re.compile(r'\bpage\s+\d+\b', re.IGNORECASE)
+
+
+def _is_in_header_or_footer(block: tuple, page_height: float) -> bool:
+    """Check if a text block is in the top 12% or bottom 12% of the page."""
+    _, y0, _, y1, *_ = block
+    return y0 < page_height * 0.12 or y1 > page_height * 0.88
+
+
+def _is_isolated_page_number(text: str) -> bool:
+    """Detect text that looks like a page number rather than a question number."""
+    text = text.strip()
+    if _PAGE_NUM_ISOLATED_RE.match(text):
+        return True
+    if _PAGE_NUM_OF_RE.match(text):
+        return True
+    if _PAGE_NUM_DASHED_RE.match(text):
+        return True
+    if _PAGE_NUM_LABEL_RE.search(text) and len(text) < 20:
+        return True
+    return False
+
+
+def _is_page_number_block(block: tuple, page_height: float) -> bool:
+    """A block is a page number if it's isolated AND in header/footer zone."""
+    if not _is_in_header_or_footer(block, page_height):
+        return False
+    text = block[4] if len(block) > 4 else ""
+    return _is_isolated_page_number(text)
+
+
+def _extract_filtered_text_from_page(page: fitz.Page) -> str:
+    """
+    Extract text from a page using block positions, filtering out
+    header/footer page numbers that would otherwise pollute question
+    boundary detection.
+    """
+    blocks = page.get_text("blocks")
+    page_height = page.rect.height
+    filtered_parts: list[str] = []
+    for block in blocks:
+        if len(block) < 5:
+            continue
+        # block_type 1 = image, skip
+        if len(block) > 6 and block[6] == 1:
+            continue
+        if _is_page_number_block(block, page_height):
+            continue
+        text = block[4].strip()
+        if text:
+            filtered_parts.append(text)
+    return "\n".join(filtered_parts)
+
+
+def _extract_embedded_text_filtered(doc: fitz.Document) -> list[str]:
+    """Extract text from each page, filtering out header/footer page numbers."""
+    return [_extract_filtered_text_from_page(page) for page in doc]
+
+
 # ── Pre-detection helpers ──────────────────────────────────────────────
 
 # Regex patterns for question number detection
@@ -370,7 +434,7 @@ def _detect_pages_with_images(doc: fitz.Document) -> list[int]:
 
 def _detect_low_text_density_pages(
     doc: fitz.Document,
-    threshold_chars: int = 80,
+    threshold_chars: int = 150,
 ) -> list[int]:
     """
     Detect pages where extractable text is very sparse — these are likely
@@ -413,6 +477,23 @@ def _build_pre_detection_context(
     return "".join(parts)
 
 
+def _extract_expected_questions_for_page(
+    embedded_texts: list[str] | None, page_index: int
+) -> list[int]:
+    """Extract expected question numbers from embedded text for a single page."""
+    if not embedded_texts or page_index >= len(embedded_texts):
+        return []
+    text = embedded_texts[page_index]
+    if not text:
+        return []
+    nums: set[int] = set()
+    for m in _Q_BOUNDARY_RE.finditer(text):
+        q_num = m.group(1) or m.group(2)
+        if q_num:
+            nums.add(int(q_num))
+    return sorted(nums)
+
+
 # ── Phase 2: Page-Level Extraction ───────────────────────────────────────
 
 EXTRACTION_SYSTEM_PROMPT = r"""You are a world-class exam paper data extraction system used by education technology companies.
@@ -427,9 +508,13 @@ CRITICAL RULES — READ CAREFULLY:
    - If the page has no visible questions, return an empty JSON array []
 
 1. EXTRACT EVERY SINGLE QUESTION. Missing even one question is a critical failure.
-   - Scan each page systematically from top to bottom
+   - STRUCTURED SCANNING ORDER: Scan the page strictly from TOP-LEFT to BOTTOM-RIGHT.
+     Read every line of text in reading order before identifying questions.
    - Watch for questions in margins, footers, or side columns on the current page
    - Include ALL parts: (a), (b), (c), (i), (ii), (iii) — every single one
+   - VISUAL COUNTING: Before returning your JSON, count the number of distinct
+     question numbers you can see on the page image. If your JSON array contains
+     fewer questions than you counted, re-scan and add the missing ones.
 
 2. HIERARCHY & STRUCTURE:
    - Main questions: numbered 1, 2, 3... (sometimes Q1, Q2, Q3)
@@ -521,6 +606,44 @@ QUESTION OBJECT SCHEMA:
 Return ONLY a valid JSON array. No preamble, no markdown fences, no explanation."""
 
 
+def _validate_expected_questions(
+    extracted: list[dict[str, Any]],
+    expected: list[int] | None,
+) -> bool:
+    """Return True if all expected question numbers are present in extracted."""
+    if not expected:
+        return True
+    extracted_nums = set()
+    for q in extracted:
+        qn = str(q.get("question_number", "")).strip()
+        if qn.isdigit():
+            extracted_nums.add(int(qn))
+    missing = set(expected) - extracted_nums
+    if missing:
+        logger.warning("Missing expected questions: %s", sorted(missing))
+        return False
+    return True
+
+
+def _basic_page_sanity(questions: list[dict[str, Any]]) -> bool:
+    """Reject pages with hallucinated numbering jumps (>10 gap within a page)."""
+    if not questions:
+        return True  # empty page is valid (cover pages, diagrams, etc.)
+    nums: list[int] = []
+    for q in questions:
+        try:
+            nums.append(int(q.get("question_number")))
+        except (TypeError, ValueError):
+            continue
+    if not nums:
+        return False
+    nums.sort()
+    for i in range(len(nums) - 1):
+        if nums[i + 1] - nums[i] > 10:
+            return False
+    return True
+
+
 def _thinking_budget_for_page_count(page_count: int) -> int:
     if page_count <= 3:
         return 0
@@ -535,18 +658,46 @@ def _call_gemini_extract(
     pre_detection_context: str = "",
     *,
     thinking_budget: int | None = None,
-    max_output_tokens: int = 8000,
+    max_output_tokens: int | None = None,
+    expected_questions: list[int] | None = None,
+    last_seen_question: int | None = None,
 ) -> tuple[list[dict[str, Any]], bool]:
     """
     Send page images through the LLM router with thinking enabled for extraction.
     Returns (questions, hit_token_limit).
     """
+    if max_output_tokens is None:
+        max_output_tokens = 7000 if len(page_images) > 1 else 5000
+
     parts: list[Any] = []
 
     # Pre-detection hints can still help the model, but page extraction must
     # remain grounded in visible content on the current image.
     if pre_detection_context:
         parts.append(pre_detection_context)
+
+    # Continuity hint from previous page — prevents Q1 reset hallucination
+    if last_seen_question is not None:
+        parts.append(
+            f"NUMBERING CONTEXT:\n"
+            f"Previous page ended at Question {last_seen_question}.\n"
+            f"Expected next questions start from {last_seen_question + 1}.\n"
+            "If you see Question 1 again, IGNORE it unless it is clearly a new section "
+            "(e.g. 'Section B' header visible on this page).\n"
+            "Do NOT re-extract questions already covered on earlier pages.\n\n"
+        )
+
+    # Expected question numbers — enforced as process instruction
+    if expected_questions:
+        q_list = ", ".join(str(q) for q in expected_questions)
+        parts.append(
+            f"STRICT EXTRACTION CHECK:\n"
+            f"The following question numbers are visible on this page: {q_list}\n\n"
+            "AFTER extraction:\n"
+            "- Compare your output with this list\n"
+            "- If ANY are missing, RE-SCAN the image before returning\n"
+            "DO NOT return incomplete results.\n\n"
+        )
 
     # If we have embedded text, provide it as supplementary context
     if embedded_texts:
@@ -597,7 +748,17 @@ def _call_gemini_extract(
         bool(response.candidates)
         and "MAX_TOKENS" in str(getattr(response.candidates[0], "finish_reason", ""))
     )
-    return _recover_partial_json_array(raw), hit_limit
+    parsed = _recover_partial_json_array(raw)
+
+    # Hard validation: reject if expected questions are missing
+    if not _validate_expected_questions(parsed, expected_questions):
+        raise ValueError("EXPECTED_QUESTIONS_MISSING")
+
+    # Sanity check: reject pages with hallucinated numbering jumps
+    if not _basic_page_sanity(parsed):
+        raise ValueError("PAGE_SANITY_FAILED")
+
+    return parsed, hit_limit
 
 
 def _text_hash(text: str) -> str:
@@ -619,12 +780,9 @@ def _dedup_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
             cleaned[q_num] = q
             continue
 
+        # Same question_number: always keep the longer text
         existing = str(cleaned[q_num].get("text", "")).strip()
-        similarity = SequenceMatcher(None, text, existing).ratio()
-        if similarity > 0.85:
-            if len(text) > len(existing):
-                cleaned[q_num] = q
-        elif len(text) > len(existing):
+        if len(text) > len(existing):
             cleaned[q_num] = q
 
     return sorted(cleaned.values(), key=lambda x: str(x.get("question_number", "")))
@@ -643,7 +801,7 @@ def _remove_similar_questions(questions: list[dict[str, Any]]) -> list[dict[str,
                 text,
                 str(existing.get("text", "")).strip(),
             ).ratio()
-            if similarity > 0.9:
+            if similarity > 0.92:
                 is_duplicate = True
                 break
 
@@ -689,75 +847,132 @@ def _parse_questions_from_pages(
     page_results: dict[int, list[dict[str, Any]]] = {}
     failed_pages: list[int] = []
 
-    def _extract_page(page_index: int) -> list[dict[str, Any]]:
+    # Pre-compute expected questions per page from embedded text
+    expected_per_page: dict[int, list[int]] = {}
+    if embedded_texts:
+        for idx in range(total_pages):
+            expected = _extract_expected_questions_for_page(embedded_texts, idx)
+            if expected:
+                expected_per_page[idx] = expected
+
+    # Sequential extraction to track last_seen_question across pages
+    last_seen_question: int | None = None
+
+    _PAGE_MAX_RETRIES = 2
+
+    for page_index in range(total_pages):
         page_texts = embedded_texts[page_index: page_index + 1] if embedded_texts else None
         page_context = (
             f"STRICT PAGE SCOPE: This request contains only Page {page_index + 1}. "
             "Extract only questions visibly present on this page.\n\n"
         )
-        try:
-            questions, _ = _call_gemini_extract(
-                [page_images[page_index]],
-                page_offset=page_index,
-                mime_type=mime_type,
-                embedded_texts=page_texts,
-                pre_detection_context=page_context,
-                thinking_budget=0,
-                max_output_tokens=8000,
-            )
-            logger.info(
-                "Page %d: extracted %d questions",
-                page_index + 1,
-                len(questions),
-            )
-            return questions
-        except Exception as exc:
-            if "ALL_LLM_PROVIDERS_FAILED" in str(exc):
-                logger.warning(
-                    "Page %d failed across all providers; retrying degraded single-page mode",
-                    page_index + 1,
-                )
-                try:
-                    questions, _ = _call_gemini_extract(
-                        [page_images[page_index]],
-                        page_offset=page_index,
-                        mime_type=mime_type,
-                        embedded_texts=page_texts,
-                        pre_detection_context=page_context,
-                        thinking_budget=0,
-                        max_output_tokens=4000,
-                    )
-                    logger.info(
-                        "Page %d recovered in degraded mode with %d questions",
-                        page_index + 1,
-                        len(questions),
-                    )
-                    return questions
-                except Exception as degraded_exc:
-                    failed_pages.append(page_index + 1)
-                    logger.warning(
-                        "Page %d degraded recovery failed: %s",
-                        page_index + 1,
-                        degraded_exc,
-                    )
-                    return []
-            failed_pages.append(page_index + 1)
-            logger.warning("Page %d extraction failed: %s", page_index + 1, exc)
-            return []
+        expected_qs = expected_per_page.get(page_index)
+        questions: list[dict[str, Any]] = []
+        page_succeeded = False
 
-    with ThreadPoolExecutor(max_workers=2) as executor:
-        futures = {executor.submit(_extract_page, page_index): page_index for page_index in range(total_pages)}
-        for future in as_completed(futures):
-            page_index = futures[future]
-            page_questions = future.result()
-            page_results[page_index] = page_questions
-            current_total = sum(len(items) for items in page_results.values())
-            logger.info(
-                "Partial extraction merged for page %d: +%d questions (%d total so far)",
-                page_index + 1,
-                len(page_questions),
-                current_total,
-            )
+        for attempt in range(_PAGE_MAX_RETRIES + 1):
+            try:
+                questions, _ = _call_gemini_extract(
+                    [page_images[page_index]],
+                    page_offset=page_index,
+                    mime_type=mime_type,
+                    embedded_texts=page_texts,
+                    pre_detection_context=page_context,
+                    thinking_budget=0,
+                    expected_questions=expected_qs,
+                    last_seen_question=last_seen_question,
+                )
+                logger.info(
+                    "Page %d: extracted %d questions (attempt %d)",
+                    page_index + 1,
+                    len(questions),
+                    attempt + 1,
+                )
+                page_succeeded = True
+                break
+
+            except ValueError as ve:
+                reason = str(ve)
+                if reason in ("EXPECTED_QUESTIONS_MISSING", "PAGE_SANITY_FAILED") and attempt < _PAGE_MAX_RETRIES:
+                    logger.warning(
+                        "Page %d: %s — retrying (attempt %d/%d)",
+                        page_index + 1,
+                        reason,
+                        attempt + 1,
+                        _PAGE_MAX_RETRIES,
+                    )
+                    continue
+                # Final attempt failed validation — accept what we got
+                logger.warning(
+                    "Page %d: %s — accepting partial after %d attempts",
+                    page_index + 1,
+                    reason,
+                    attempt + 1,
+                )
+                page_succeeded = True
+                break
+
+            except Exception as exc:
+                if "ALL_LLM_PROVIDERS_FAILED" in str(exc):
+                    logger.warning(
+                        "Page %d failed across all providers; retrying degraded mode",
+                        page_index + 1,
+                    )
+                    try:
+                        questions, _ = _call_gemini_extract(
+                            [page_images[page_index]],
+                            page_offset=page_index,
+                            mime_type=mime_type,
+                            embedded_texts=page_texts,
+                            pre_detection_context=page_context,
+                            thinking_budget=0,
+                            max_output_tokens=4000,
+                            expected_questions=None,  # relax for degraded mode
+                            last_seen_question=last_seen_question,
+                        )
+                        logger.info(
+                            "Page %d recovered in degraded mode with %d questions",
+                            page_index + 1,
+                            len(questions),
+                        )
+                        page_succeeded = True
+                        break
+                    except Exception as degraded_exc:
+                        logger.warning(
+                            "Page %d degraded recovery failed: %s",
+                            page_index + 1,
+                            degraded_exc,
+                        )
+                        break
+                else:
+                    logger.warning("Page %d extraction failed: %s", page_index + 1, exc)
+                    break
+
+        if page_succeeded:
+            page_results[page_index] = questions
+        else:
+            failed_pages.append(page_index + 1)
+            page_results[page_index] = []
+            continue
+
+        # Update last_seen_question from this page's results
+        page_qs = page_results.get(page_index, [])
+        for q in page_qs:
+            try:
+                qn = int(q.get("question_number", 0))
+                if last_seen_question is None or qn > last_seen_question:
+                    last_seen_question = qn
+            except (ValueError, TypeError):
+                pass
+
+        current_total = sum(len(items) for items in page_results.values())
+        logger.info(
+            "Partial extraction merged for page %d: +%d questions (%d total so far, last_q=%s)",
+            page_index + 1,
+            len(page_qs),
+            current_total,
+            last_seen_question,
+        )
 
     ordered_results: list[dict[str, Any]] = []
     for page_index in range(total_pages):
@@ -1709,7 +1924,8 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         doc = fitz.open(stream=pdf_bytes, filetype="pdf")
         total_pages = len(doc)
         is_scanned = _is_scanned_pdf(doc)
-        embedded_texts = _extract_embedded_text(doc) if not is_scanned else None
+        # Use layout-aware extraction to filter out header/footer page numbers
+        embedded_texts = _extract_embedded_text_filtered(doc) if not is_scanned else None
 
         # Pre-detect diagram pages and question boundaries BEFORE closing doc
         pages_with_images = _detect_pages_with_images(doc)
