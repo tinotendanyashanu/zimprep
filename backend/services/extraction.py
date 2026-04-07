@@ -2,16 +2,15 @@
 PDF Extraction Pipeline — Multi-Phase Architecture
 
 Phase 1: Image preprocessing — enhance scanned/phone-captured PDFs
-Phase 2: Full-document extraction — send ALL pages with thinking enabled
+Phase 2: Deterministic page extraction — one LLM call per page
 Phase 3: Verification — second LLM pass to catch missed/incorrect questions
 Phase 4: Flatten, validate, and store
 
 Key differences from naive single-pass:
-  - Thinking enabled (budget=10240) — the model MUST reason about layout
-  - All pages sent together — full paper context for numbering/sections
-  - Image preprocessing — contrast/sharpness enhancement for scanned docs
-  - Embedded text extraction — digital PDF text used as supplementary context
-  - Verification pass — catches ~80% of remaining errors
+  - Page-level extraction keeps numbering grounded to visible content
+  - Image preprocessing improves legibility for scanned docs
+  - Embedded text extraction supplements page images where available
+  - Verification pass remains asynchronous and non-blocking
   - Higher DPI (200) and PNG for scanned documents
 
 Math notation:
@@ -50,6 +49,7 @@ except ImportError:
     _HAS_TESSERACT = False
 
 from db.client import get_supabase
+from services.content_formatting import normalize_render_payload, normalize_scientific_content
 from services.llm_router import call_llm
 
 logger = logging.getLogger(__name__)
@@ -412,17 +412,22 @@ def _build_pre_detection_context(
     return "".join(parts)
 
 
-# ── Phase 2: Full-Document Extraction ────────────────────────────────────
+# ── Phase 2: Page-Level Extraction ───────────────────────────────────────
 
 EXTRACTION_SYSTEM_PROMPT = r"""You are a world-class exam paper data extraction system used by education technology companies.
 Your job is to extract EVERY question from ZIMSEC and Cambridge past exam paper images with 100% accuracy.
 
 CRITICAL RULES — READ CAREFULLY:
 
+0. PAGE-LEVEL BOUNDARY RULES:
+   - Extract ONLY visible questions on the current page image
+   - DO NOT infer missing questions from previous or next pages
+   - DO NOT continue numbering beyond what is visible on this page
+   - If the page has no visible questions, return an empty JSON array []
+
 1. EXTRACT EVERY SINGLE QUESTION. Missing even one question is a critical failure.
    - Scan each page systematically from top to bottom
-   - Check for questions that start at the bottom of one page and continue on the next
-   - Watch for questions in margins, footers, or continuation pages
+   - Watch for questions in margins, footers, or side columns on the current page
    - Include ALL parts: (a), (b), (c), (i), (ii), (iii) — every single one
 
 2. HIERARCHY & STRUCTURE:
@@ -430,7 +435,6 @@ CRITICAL RULES — READ CAREFULLY:
    - Sub-questions: lettered (a), (b), (c)... — go inside `sub_parts` array
    - Nested sub-parts: roman numerals (i), (ii), (iii)... — go inside the parent sub_part's `sub_parts`
    - If a main question is ONLY a container (e.g., "Question 1" with no standalone text, just (a), (b), (c)), still include it with the stem text (e.g., instructions like "Read the passage and answer...") and marks=0
-   - If a question spans multiple pages, COMBINE it into one object — do not split across pages
    - SECTIONS: Many papers have Section A, Section B, etc. Capture the section letter.
 
 3. MATH FORMATTING — ALL math must use LaTeX:
@@ -516,12 +520,6 @@ QUESTION OBJECT SCHEMA:
 Return ONLY a valid JSON array. No preamble, no markdown fences, no explanation."""
 
 
-# Maximum pages to send in a single Gemini call.
-# Gemini 2.5 Flash supports very large context — send as many pages as possible
-# for full paper context. Only split if we hit token limits.
-_MAX_PAGES_PER_CALL = 3
-
-
 def _thinking_budget_for_page_count(page_count: int) -> int:
     if page_count <= 3:
         return 0
@@ -544,8 +542,8 @@ def _call_gemini_extract(
     """
     parts: list[Any] = []
 
-    # Pre-detection hints (question boundaries + diagram pages) — gives the
-    # LLM a checklist so it doesn't miss questions
+    # Pre-detection hints can still help the model, but page extraction must
+    # remain grounded in visible content on the current image.
     if pre_detection_context:
         parts.append(pre_detection_context)
 
@@ -564,14 +562,17 @@ def _call_gemini_extract(
                 + "\n\n---END SUPPLEMENTARY TEXT---\n\n"
             )
 
-    # Add all page images
+    # Add page image(s)
     for i, img_bytes in enumerate(page_images):
         parts.append(types.Part.from_bytes(data=img_bytes, mime_type=mime_type))
         parts.append(f"[Page {page_offset + i + 1}]")
 
     parts.append(
-        "Extract ALL questions from these exam paper pages. "
-        "Be thorough — check every page carefully. Return JSON array only."
+        "Extract ONLY the visible questions on this page. "
+        "Do NOT infer questions from earlier or later pages. "
+        "Do NOT continue numbering beyond what is visible here. "
+        "If there are no questions on this page, return []. "
+        "Return JSON array only."
     )
 
     response = call_llm(
@@ -598,61 +599,36 @@ def _call_gemini_extract(
     return _recover_partial_json_array(raw), hit_limit
 
 
-_OVERLAP_PAGES = 2  # pages to overlap between batches for cross-page questions
-
-
 def _text_hash(text: str) -> str:
     """Short hash of normalised text for similarity comparison."""
     normalised = re.sub(r'\s+', ' ', text.strip().lower())
     return hashlib.md5(normalised.encode()).hexdigest()[:12]
 
 
-def _question_score(q: dict[str, Any]) -> int:
-    """Score a question by completeness — higher is better."""
-    score = len(str(q.get("text", "")))
-    score += len(q.get("sub_parts") or []) * 200  # sub_parts are very valuable
-    score += 50 if q.get("marks", 0) > 0 else 0
-    score += 30 if q.get("topic_tags") else 0
-    return score
-
-
 def _dedup_questions(questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
-    Remove duplicate questions from overlapping batch windows.
+    Remove duplicate questions while preserving overall question order.
     Uses a composite key of section + question_number.
-    When duplicates exist, keeps the version with the highest completeness
-    score (text length + sub_parts + marks + tags).
-    Also detects near-identical text via hashing to catch duplicates with
-    slightly different numbering.
+    When duplicates exist, keeps the version with the longest text.
     """
-    seen: dict[str, dict[str, Any]] = {}
-    text_hashes: dict[str, str] = {}  # text_hash → first key that had it
+    ordered: list[dict[str, Any]] = []
+    key_to_index: dict[str, int] = {}
 
     for q in questions:
         q_num = str(q.get("question_number", ""))
         section = q.get("section") or ""
         key = f"{section}:{q_num}"
-        t_hash = _text_hash(str(q.get("text", "")))
-
-        # Check for near-identical text under a different key
-        if t_hash in text_hashes and text_hashes[t_hash] != key:
-            existing_key = text_hashes[t_hash]
-            if existing_key in seen and _question_score(q) > _question_score(seen[existing_key]):
-                del seen[existing_key]
-                seen[key] = q
-                text_hashes[t_hash] = key
-            # else: skip this duplicate
+        existing_index = key_to_index.get(key)
+        if existing_index is None:
+            key_to_index[key] = len(ordered)
+            ordered.append(q)
             continue
 
-        if key in seen:
-            if _question_score(q) > _question_score(seen[key]):
-                seen[key] = q
-        else:
-            seen[key] = q
-            if t_hash not in text_hashes:
-                text_hashes[t_hash] = key
+        existing = ordered[existing_index]
+        if len(str(q.get("text", ""))) > len(str(existing.get("text", ""))):
+            ordered[existing_index] = q
 
-    return list(seen.values())
+    return ordered
 
 
 def _parse_questions_from_pages(
@@ -660,129 +636,101 @@ def _parse_questions_from_pages(
     mime_type: str,
     embedded_texts: list[str] | None = None,
     pre_detection_context: str = "",
-    force_batch_mode: bool = False,
 ) -> list[dict[str, Any]]:
     """
-    Extract questions from all pages using the routed LLM chain with full paper context.
-
-    Sends all pages together when possible (up to _MAX_PAGES_PER_CALL).
-    Falls back to splitting if token limits are hit.
-    Uses overlapping page windows to catch cross-page questions at batch
-    boundaries.
+    Extract questions from all pages using deterministic page-level calls.
+    Each worker processes exactly one page. Results are merged in page order.
     """
-    total_pages = len(page_images)
-
-    def _worker_limit() -> int:
-        return 1 if total_pages <= 6 else 2
-
-    def _run_degraded_single_page_recovery(start_index: int, end_index: int) -> list[dict[str, Any]]:
-        logger.warning(
-            "Degraded recovery mode for pages %d–%d: batch_size=1 thinking=off max_tokens=4000",
-            start_index + 1,
-            end_index,
-        )
-        recovered: list[dict[str, Any]] = []
-        for page_index in range(start_index, end_index):
-            batch_texts = embedded_texts[page_index: page_index + 1] if embedded_texts else None
-            questions, _ = _call_gemini_extract(
-                page_images[page_index: page_index + 1],
-                page_offset=page_index,
-                mime_type=mime_type,
-                embedded_texts=batch_texts,
-                pre_detection_context=pre_detection_context,
-                thinking_budget=0,
-                max_output_tokens=4000,
-            )
-            recovered.extend(questions)
-        return recovered
-
-    def _extract_batch(start_index: int) -> list[dict[str, Any]]:
-        batch_size = min(_MAX_PAGES_PER_CALL, len(page_images) - start_index)
-
-        while batch_size > 0:
-            end_index = min(start_index + batch_size, len(page_images))
-            batch = page_images[start_index:end_index]
-            batch_texts = embedded_texts[start_index:end_index] if embedded_texts else None
-
-            try:
-                questions, hit_limit = _call_gemini_extract(
-                    batch,
-                    page_offset=start_index,
-                    mime_type=mime_type,
-                    embedded_texts=batch_texts,
-                    pre_detection_context=pre_detection_context,
-                )
-            except Exception as exc:
-                if "ALL_LLM_PROVIDERS_FAILED" in str(exc):
-                    try:
-                        return _run_degraded_single_page_recovery(start_index, end_index)
-                    except Exception as degraded_exc:
-                        raise RuntimeError(
-                            f"Degraded extraction failed for pages {start_index + 1}–{end_index}: {degraded_exc}"
-                        ) from degraded_exc
-                raise RuntimeError(
-                    f"Extraction failed for pages {start_index + 1}–{end_index} after all retries: {exc}"
-                ) from exc
-
-            if hit_limit and batch_size > 1:
-                batch_size = max(1, batch_size // 2)
-                logger.warning(
-                    "Token limit hit at page %d; retrying batch with batch_size=%d",
-                    start_index + 1,
-                    batch_size,
-                )
-                continue
-
-            logger.info(
-                "Pages %d–%d: extracted %d questions (batch_size=%d)",
-                start_index + 1,
-                end_index,
-                len(questions),
-                batch_size,
-            )
-            return questions
-
-        return []
-
     if not page_images:
         return []
 
-    batch_starts: list[int]
-    if not force_batch_mode and len(page_images) <= _MAX_PAGES_PER_CALL:
-        batch_starts = [0]
-    else:
-        batch_starts = []
-        i = 0
-        while i < len(page_images):
-            batch_starts.append(i)
-            advance = min(_MAX_PAGES_PER_CALL, len(page_images) - i)
-            if i + advance < len(page_images) and advance > _OVERLAP_PAGES:
-                advance -= _OVERLAP_PAGES
-            i += advance
+    total_pages = len(page_images)
+    page_results: dict[int, list[dict[str, Any]]] = {}
+    failed_pages: list[int] = []
 
-    results: list[dict[str, Any]] = []
-    max_workers = min(_worker_limit(), len(batch_starts)) or 1
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {executor.submit(_extract_batch, start_index): start_index for start_index in batch_starts}
-        for future in as_completed(futures):
-            start_index = futures[future]
-            batch_questions = future.result()
-            results.extend(batch_questions)
+    def _extract_page(page_index: int) -> list[dict[str, Any]]:
+        page_texts = embedded_texts[page_index: page_index + 1] if embedded_texts else None
+        page_context = (
+            f"STRICT PAGE SCOPE: This request contains only Page {page_index + 1}. "
+            "Extract only questions visibly present on this page.\n\n"
+        )
+        try:
+            questions, _ = _call_gemini_extract(
+                [page_images[page_index]],
+                page_offset=page_index,
+                mime_type=mime_type,
+                embedded_texts=page_texts,
+                pre_detection_context=page_context,
+                thinking_budget=0,
+                max_output_tokens=8000,
+            )
             logger.info(
-                "Partial extraction merged for pages starting at %d: +%d questions (%d total so far)",
-                start_index + 1,
-                len(batch_questions),
-                len(results),
+                "Page %d: extracted %d questions",
+                page_index + 1,
+                len(questions),
+            )
+            return questions
+        except Exception as exc:
+            if "ALL_LLM_PROVIDERS_FAILED" in str(exc):
+                logger.warning(
+                    "Page %d failed across all providers; retrying degraded single-page mode",
+                    page_index + 1,
+                )
+                try:
+                    questions, _ = _call_gemini_extract(
+                        [page_images[page_index]],
+                        page_offset=page_index,
+                        mime_type=mime_type,
+                        embedded_texts=page_texts,
+                        pre_detection_context=page_context,
+                        thinking_budget=0,
+                        max_output_tokens=4000,
+                    )
+                    logger.info(
+                        "Page %d recovered in degraded mode with %d questions",
+                        page_index + 1,
+                        len(questions),
+                    )
+                    return questions
+                except Exception as degraded_exc:
+                    failed_pages.append(page_index + 1)
+                    logger.warning(
+                        "Page %d degraded recovery failed: %s",
+                        page_index + 1,
+                        degraded_exc,
+                    )
+                    return []
+            failed_pages.append(page_index + 1)
+            logger.warning("Page %d extraction failed: %s", page_index + 1, exc)
+            return []
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = {executor.submit(_extract_page, page_index): page_index for page_index in range(total_pages)}
+        for future in as_completed(futures):
+            page_index = futures[future]
+            page_questions = future.result()
+            page_results[page_index] = page_questions
+            current_total = sum(len(items) for items in page_results.values())
+            logger.info(
+                "Partial extraction merged for page %d: +%d questions (%d total so far)",
+                page_index + 1,
+                len(page_questions),
+                current_total,
             )
 
-    # Dedup questions from overlapping windows
-    if len(page_images) > _MAX_PAGES_PER_CALL or force_batch_mode:
-        before = len(results)
-        results = _dedup_questions(results)
-        if len(results) < before:
-            logger.info("Dedup removed %d duplicate questions from overlapping batches",
-                        before - len(results))
+    ordered_results: list[dict[str, Any]] = []
+    for page_index in range(total_pages):
+        ordered_results.extend(page_results.get(page_index, []))
 
+    before = len(ordered_results)
+    results = _dedup_questions(ordered_results)
+    if len(results) < before:
+        logger.info("Dedup removed %d duplicate questions", before - len(results))
+    if failed_pages and len(failed_pages) < total_pages:
+        logger.warning(
+            "Extraction produced no questions for page(s): %s",
+            ", ".join(str(page) for page in failed_pages),
+        )
     return results
 
 
@@ -1226,8 +1174,7 @@ def _compute_confidence(row: dict[str, Any]) -> float:
 
 def _sanitise_question_text(text: str) -> str:
     """Clean up hallucinated whitespace from extracted question text."""
-    text = re.sub(r'\n{3,}', '\n\n', text)
-    return text.strip()
+    return normalize_scientific_content(text)
 
 
 # ── Diagram Processing ──────────────────────────────────────────────────
@@ -1444,7 +1391,7 @@ def _check_duplicate_pdf(paper_id: str, pdf_hash: str) -> bool:
             .select("id, status")
             .eq("pdf_hash", pdf_hash)
             .neq("id", paper_id)
-            .in_("status", ["ready", "needs_review"])
+            .in_("status", ["clean", "needs_review"])
             .limit(1)
             .execute()
         )
@@ -1545,7 +1492,7 @@ def _build_db_rows(
             "diagram_status": diagram_status,
             "topic_tags": q.get("topic_tags", []),
             "question_type": q.get("question_type", "written"),
-            "mcq_options": q.get("mcq_options"),
+            "mcq_options": normalize_render_payload(q.get("mcq_options")),
             "needs_review": needs_review,
             "review_reasons": review_reasons,
             "hidden": auto_hidden,
@@ -1617,32 +1564,44 @@ def _update_paper_status(
 ) -> None:
     if not db_rows:
         logger.error("Extraction produced 0 questions for paper %s", paper_id)
-        supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
+        supabase.table("paper").update({"status": "failed"}).eq("id", paper_id).execute()
         return
 
     review_flagged = sum(1 for r in db_rows if r.get("needs_review"))
-    has_critical_issues = (
+    has_minor_issues = (
         bool(validation_issues)
         or bool(hallucination_warnings)
-        or bool(post_gaps)
+        or review_flagged > 0
         or low_confidence_count > len(db_rows) * 0.3
     )
 
-    if has_critical_issues:
+    if post_gaps:
+        supabase.table("paper").update({"status": "partial"}).eq("id", paper_id).execute()
+        logger.warning(
+            "Paper %s marked partial — gaps=%d, validation=%d, hallucinations=%d, low_confidence=%d/%d, flagged=%d/%d",
+            paper_id,
+            len(post_gaps),
+            len(validation_issues),
+            len(hallucination_warnings),
+            low_confidence_count,
+            len(db_rows),
+            review_flagged,
+            len(db_rows),
+        )
+    elif has_minor_issues:
         supabase.table("paper").update({"status": "needs_review"}).eq("id", paper_id).execute()
         logger.warning(
-            "Paper %s marked needs_review — validation=%d, hallucinations=%d, gaps=%d, low_confidence=%d/%d, flagged=%d/%d",
+            "Paper %s marked needs_review — validation=%d, hallucinations=%d, low_confidence=%d/%d, flagged=%d/%d",
             paper_id,
             len(validation_issues),
             len(hallucination_warnings),
-            len(post_gaps),
             low_confidence_count,
             len(db_rows),
             review_flagged,
             len(db_rows),
         )
     else:
-        supabase.table("paper").update({"status": "ready"}).eq("id", paper_id).execute()
+        supabase.table("paper").update({"status": "clean"}).eq("id", paper_id).execute()
 
     logger.info(
         "Extraction complete for paper %s — %d questions inserted (%d flagged for review)",
@@ -1727,9 +1686,12 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         low_density_pages = _detect_low_text_density_pages(doc)
         doc.close()
 
-        force_batch_mode = total_pages > 20
-        if force_batch_mode:
-            logger.info("Large paper safeguard enabled for paper %s: %d pages", paper_id, total_pages)
+        if total_pages > 20:
+            logger.info(
+                "Large paper safeguard enabled for paper %s: %d pages will use deterministic page extraction",
+                paper_id,
+                total_pages,
+            )
 
         page_images, mime_type = _render_pages(pdf_bytes, is_scanned)
         logger.info("Rendered %d enhanced pages for paper %s (DPI=200)", len(page_images), paper_id)
@@ -1774,7 +1736,6 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         nested_questions = _parse_questions_from_pages(
             page_images, mime_type, embedded_texts,
             pre_detection_context=pre_detection_context,
-            force_batch_mode=force_batch_mode,
         )
         logger.info(
             "Phase 2 extracted %d main questions for paper %s",
@@ -1858,7 +1819,6 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         should_verify_async = (
             bool(nested_questions)
             and bool(seq_gaps or pre_verification_issues)
-            and len(page_images) <= _MAX_PAGES_PER_CALL
         )
         if should_verify_async:
             thread = threading.Thread(
@@ -1882,4 +1842,4 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
 
     except Exception as exc:
         logger.error("Extraction failed for paper %s: %s", paper_id, exc, exc_info=True)
-        supabase.table("paper").update({"status": "error"}).eq("id", paper_id).execute()
+        supabase.table("paper").update({"status": "failed"}).eq("id", paper_id).execute()

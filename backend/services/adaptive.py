@@ -7,6 +7,7 @@ import random
 from typing import Any
 
 from db.client import get_supabase
+from services.content_formatting import normalize_render_payload
 
 
 def _topic_weight(fail_ratio: float | None) -> float:
@@ -158,8 +159,8 @@ def pick_next_question(
     for q, w in zip(questions, weights):
         cumulative += w
         if r <= cumulative:
-            return q
-    return questions[-1]
+            return normalize_render_payload(q)
+    return normalize_render_payload(questions[-1])
 
 
 def get_weak_topics(subject_id: str, student_id: str) -> list[dict[str, Any]]:

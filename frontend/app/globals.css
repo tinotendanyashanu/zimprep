@@ -167,6 +167,17 @@
   .safe-area-inset-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
+
+  .math-content .katex-display {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.25rem 0;
+  }
+
+  .math-content .katex {
+    max-width: 100%;
+  }
 }
 
 /* Slide-in animations for feedback cards */

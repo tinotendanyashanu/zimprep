@@ -3,8 +3,8 @@
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import rehypeRaw from "rehype-raw";
-import "katex/dist/katex.min.css";
+import { normalizeRenderableText } from "@/lib/content-normalization";
+import { cn } from "@/lib/utils";
 
 /**
  * Renders question text with full markdown formatting AND LaTeX math.
@@ -25,11 +25,13 @@ interface MathTextProps {
 }
 
 export function MathText({ text, className }: MathTextProps) {
+  const content = normalizeRenderableText(text);
+
   return (
-    <div className={className}>
+    <div className={cn("math-content max-w-full overflow-hidden break-words text-sm leading-relaxed", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkMath]}
-        rehypePlugins={[rehypeKatex, rehypeRaw]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           // Tables — styled to look like clean exam-paper tables
           table: ({ children }) => (
@@ -57,7 +59,7 @@ export function MathText({ text, className }: MathTextProps) {
           ),
           // Paragraphs — avoid double spacing inside question text
           p: ({ children }) => (
-            <p className="mb-1 last:mb-0 leading-relaxed">{children}</p>
+            <p className="mb-1 last:mb-0 break-words whitespace-pre-wrap leading-relaxed">{children}</p>
           ),
           // Bold
           strong: ({ children }) => (
@@ -71,7 +73,7 @@ export function MathText({ text, className }: MathTextProps) {
             <ol className="list-decimal pl-5 space-y-0.5 my-1">{children}</ol>
           ),
           li: ({ children }) => (
-            <li className="leading-relaxed">{children}</li>
+            <li className="break-words whitespace-pre-wrap leading-relaxed">{children}</li>
           ),
           // Blockquotes — used for indented sub-parts sometimes
           blockquote: ({ children }) => (
@@ -81,7 +83,7 @@ export function MathText({ text, className }: MathTextProps) {
           ),
         }}
       >
-        {text}
+        {content}
       </ReactMarkdown>
     </div>
   );

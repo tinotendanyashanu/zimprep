@@ -14,6 +14,11 @@ from google import genai
 from google.genai import types
 from openai import OpenAI
 
+try:
+    from anthropic import Anthropic
+except ImportError:  # pragma: no cover - handled as provider fallback at runtime
+    Anthropic = None
+
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_MODEL_TYPES = {"extraction", "verification", "mcq"}
@@ -49,16 +54,19 @@ class _GeminiLikeResponse:
 
 _PROVIDER_CHAIN = {
     "extraction": (
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
         _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "verification": (
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
         _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "mcq": (
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
         _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
@@ -109,6 +117,25 @@ def normalize_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
             "Gemini config normalized: max_output_tokens=%s thinking_config=%s",
             normalized["max_output_tokens"],
             "set" if normalized["thinking_config"] is not None else "none",
+        )
+        return normalized
+
+    if provider == "anthropic":
+        max_tokens = config.get("max_output_tokens", 4000)
+        if not isinstance(max_tokens, int):
+            try:
+                max_tokens = int(max_tokens)
+            except (TypeError, ValueError):
+                max_tokens = 4000
+
+        normalized = {
+            "max_tokens": max(1, min(max_tokens, _MAX_PROVIDER_OUTPUT_TOKENS)),
+            "temperature": config.get("temperature", 0.2),
+        }
+        logger.info(
+            "Claude config normalized: max_tokens=%s temperature=%s",
+            normalized["max_tokens"],
+            normalized["temperature"],
         )
         return normalized
 
@@ -165,6 +192,7 @@ def call_llm(
 
 def _get_provider_chain(model_type: str, config: dict[str, Any]) -> tuple[_ProviderSpec, ...]:
     chain = _PROVIDER_CHAIN[model_type]
+    claude = next((spec for spec in chain if spec.provider == "anthropic"), None)
     gemini_flash = next((spec for spec in chain if spec.model == "gemini-2.5-flash"), None)
     gemini_pro = next((spec for spec in chain if spec.model == "gemini-2.5-pro"), None)
     openai = next((spec for spec in chain if spec.provider == "openai"), None)
@@ -177,13 +205,16 @@ def _get_provider_chain(model_type: str, config: dict[str, Any]) -> tuple[_Provi
             batch_size = None
 
         if batch_size is not None and batch_size <= 3:
-            ordered = [gemini_flash, openai]
-            logger.info("Using Flash-first extraction chain for small batch: batch_size=%s", batch_size)
+            ordered = [gemini_flash, claude, openai]
+            logger.info("Using Flash-Claude extraction chain for small batch: batch_size=%s", batch_size)
         else:
-            ordered = [gemini_pro, gemini_flash, openai]
+            ordered = [claude, gemini_pro, gemini_flash, openai]
         return tuple(spec for spec in ordered if spec is not None)
 
-    if model_type in {"verification", "mcq"}:
+    if model_type == "verification":
+        return tuple(spec for spec in (gemini_flash, claude, openai) if spec is not None)
+
+    if model_type == "mcq":
         return tuple(spec for spec in (gemini_flash, openai) if spec is not None)
 
     return chain
@@ -235,6 +266,14 @@ def _call_provider_with_policy(
         try:
             if provider_spec.provider == "gemini":
                 response = _call_gemini(
+                    model=provider_spec.model,
+                    contents=contents,
+                    system_instruction=system_instruction,
+                    config=normalized_config,
+                    timeout_seconds=provider_spec.timeout_seconds,
+                )
+            elif provider_spec.provider == "anthropic":
+                response = _call_anthropic(
                     model=provider_spec.model,
                     contents=contents,
                     system_instruction=system_instruction,
@@ -371,6 +410,42 @@ def _call_openai(
     return _GeminiLikeResponse(text=text, finish_reason=finish_reason)
 
 
+def _call_anthropic(
+    *,
+    model: str,
+    contents: list,
+    system_instruction: str,
+    config: dict[str, Any],
+    timeout_seconds: int,
+):
+    if Anthropic is None:
+        raise RuntimeError("anthropic package is not installed")
+
+    api_key = os.environ["ANTHROPIC_API_KEY"]
+    client = Anthropic(api_key=api_key, timeout=timeout_seconds)
+    cfg = normalize_config("anthropic", config)
+    message_content = _build_anthropic_content(contents=contents)
+
+    response = _run_with_timeout(
+        lambda: client.messages.create(
+            model=model,
+            system=system_instruction,
+            messages=[{"role": "user", "content": message_content}],
+            max_tokens=cfg["max_tokens"],
+            temperature=cfg["temperature"],
+        ),
+        timeout_seconds=timeout_seconds,
+        provider_name=model,
+    )
+
+    text = "".join(
+        block.text for block in response.content
+        if getattr(block, "type", None) == "text" and getattr(block, "text", None)
+    )
+    finish_reason = getattr(response, "stop_reason", None)
+    return _GeminiLikeResponse(text=text, finish_reason=finish_reason)
+
+
 def _build_gemini_config(
     *,
     system_instruction: str,
@@ -427,6 +502,25 @@ def _build_openai_messages(*, contents: list, system_instruction: str) -> list[d
     return messages
 
 
+def _build_anthropic_content(*, contents: list) -> list[dict[str, Any]]:
+    user_parts: list[dict[str, Any]] = []
+
+    for item in contents:
+        text_part = _as_text_part(item)
+        if text_part is not None:
+            user_parts.append({"type": "text", "text": text_part})
+            continue
+
+        image_part = _as_anthropic_image_part(item)
+        if image_part is not None:
+            user_parts.append(image_part)
+            continue
+
+        user_parts.append({"type": "text", "text": str(item)})
+
+    return user_parts
+
+
 def _as_text_part(item: Any) -> str | None:
     if isinstance(item, str):
         return item
@@ -448,6 +542,27 @@ def _as_image_part(item: Any) -> dict[str, Any] | None:
         "type": "image_url",
         "image_url": {
             "url": f"data:{mime_type};base64,{encoded}",
+        },
+    }
+
+
+def _as_anthropic_image_part(item: Any) -> dict[str, Any] | None:
+    inline_data = getattr(item, "inline_data", None)
+    if inline_data is None:
+        return None
+
+    data = getattr(inline_data, "data", None)
+    mime_type = getattr(inline_data, "mime_type", None)
+    if not data or not mime_type:
+        return None
+
+    encoded = base64.b64encode(data).decode("ascii")
+    return {
+        "type": "image",
+        "source": {
+            "type": "base64",
+            "media_type": mime_type,
+            "data": encoded,
         },
     }
 

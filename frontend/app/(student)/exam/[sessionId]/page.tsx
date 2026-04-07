@@ -186,11 +186,11 @@ function PracticeFeedback({ result, question, onNext, onRetry }: {
         </div>
       )}
 
-      <div className="flex gap-3 mt-4">
-        <Button onClick={onNext} size="lg" className="flex-1">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row">
+        <Button onClick={onNext} size="lg" className="w-full sm:flex-1">
           Next Question →
         </Button>
-        <Button onClick={onRetry} size="lg" variant="outline">
+        <Button onClick={onRetry} size="lg" variant="outline" className="w-full sm:w-auto">
           Try Again
         </Button>
       </div>
@@ -656,7 +656,7 @@ export default function ExamSessionPage() {
 
           {/* Navigation — sticky on mobile */}
           {!practiceResults[currentQ.id] && (
-            <div className="flex gap-3 pt-2 sm:relative fixed bottom-0 inset-x-0 sm:inset-auto bg-background/95 backdrop-blur-md sm:backdrop-blur-none sm:bg-transparent p-4 sm:p-0 border-t border-border sm:border-0 z-30 safe-area-inset-bottom">
+            <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-50 flex gap-3 border-t border-border bg-background/95 p-4 pt-2 backdrop-blur-md safe-area-inset-bottom sm:relative sm:bottom-auto sm:inset-auto sm:z-auto sm:border-0 sm:bg-transparent sm:p-0 sm:pt-2 sm:backdrop-blur-none">
               <Button
                 disabled={currentIdx === 0}
                 onClick={() => { setCurrentIdx((i) => i - 1); setAnswerTab("text"); }}

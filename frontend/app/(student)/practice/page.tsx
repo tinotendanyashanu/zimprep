@@ -149,31 +149,38 @@ function FeedbackCard({ result, question, onNext, onFlag, flagged }: {
         </div>
       )}
 
-      <div className="flex gap-3 pt-1">
+      <div className="flex flex-col gap-3 pt-1 sm:flex-row">
         <button
           onClick={onNext}
-          className="flex-1 py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:opacity-90 transition"
+          className="w-full py-3 bg-primary text-primary-foreground rounded-xl font-bold text-sm hover:opacity-90 transition sm:flex-1"
         >
           Next Question →
         </button>
         {flagged ? (
-          <span className="px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground opacity-40">Flagged</span>
+          <span className="w-full px-4 py-3 border border-border rounded-xl text-center text-xs text-muted-foreground opacity-40 sm:w-auto">
+            Flagged
+          </span>
         ) : picking ? (
-          <div className="flex gap-2">
+          <div className="grid w-full grid-cols-1 gap-2 sm:flex sm:w-auto sm:flex-1">
             <button
               onClick={() => { onFlag("question_issue"); setPicking(false); }}
-              className="flex-1 py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+              className="w-full py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition sm:flex-1"
             >Question issue</button>
             <button
               onClick={() => { onFlag("marking_issue"); setPicking(false); }}
-              className="flex-1 py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+              className="w-full py-2 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition sm:flex-1"
             >Marking issue</button>
-            <button onClick={() => setPicking(false)} className="px-3 py-2 text-xs text-muted-foreground hover:bg-muted rounded-xl transition">✕</button>
+            <button
+              onClick={() => setPicking(false)}
+              className="w-full px-3 py-2 text-xs text-muted-foreground hover:bg-muted rounded-xl transition sm:w-auto"
+            >
+              ✕
+            </button>
           </div>
         ) : (
           <button
             onClick={() => setPicking(true)}
-            className="px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition"
+            className="w-full px-4 py-3 border border-border rounded-xl text-xs text-muted-foreground hover:bg-muted transition sm:w-auto"
           >Flag</button>
         )}
       </div>
@@ -605,7 +612,7 @@ export default function PracticePage() {
 
               {/* Answer area */}
               {!result && (
-                <div className="px-5 pb-5 space-y-4 border-t border-border pt-4">
+                <div className="px-5 pb-28 space-y-4 border-t border-border pt-4 sm:pb-5">
                   {question.question_type === "mcq" ? (
                     <div className="grid grid-cols-1 gap-2.5">
                       {getMcqOptions(question).map((opt, idx) => {
@@ -699,7 +706,7 @@ export default function PracticePage() {
                     </div>
                   )}
 
-                  <div className="sm:relative fixed bottom-0 inset-x-0 sm:inset-auto bg-background/95 backdrop-blur-md sm:backdrop-blur-none sm:bg-transparent p-4 sm:p-0 border-t border-border sm:border-0 z-30 safe-area-inset-bottom">
+                  <div className="fixed inset-x-0 bottom-[calc(5rem+env(safe-area-inset-bottom,0px))] z-50 border-t border-border bg-background/95 p-4 backdrop-blur-md safe-area-inset-bottom sm:relative sm:bottom-auto sm:inset-auto sm:z-auto sm:border-0 sm:bg-transparent sm:p-0 sm:backdrop-blur-none">
                     <button
                       onClick={handleSubmit}
                       disabled={submitting || (!answer.trim() && !answerImageUrl)}

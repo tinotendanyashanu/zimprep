@@ -12,6 +12,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 from db.client import get_supabase
+from services.content_formatting import normalize_render_payload
 from services.marking import generate_mcq_explanations, mark_session
 from services.quota import check_exam_quota
 
@@ -319,10 +320,10 @@ def get_results(session_id: str) -> dict[str, Any]:
         (a.get("ai_score") or 0) for a in attempts if a.get("marked_at") is not None
     )
 
-    return {
+    return normalize_render_payload({
         "all_marked": total > 0 and marked == total,
         "marked_count": marked,
         "total_count": total,
         "total_score": total_score,
         "attempts": attempts,
-    }
+    })

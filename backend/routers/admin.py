@@ -15,6 +15,7 @@ IMAGE_BUCKET = "question-images"
 
 from db.client import get_supabase
 from db.models_subscription import TIER_CONFIG, PAID_TIERS, PAYSTACK_PLAN_NAMES
+from services.content_formatting import normalize_render_payload, normalize_scientific_content
 from services.extraction import run_extraction, _resolve_missing_mcq_answers
 from services import paystack as ps
 
@@ -217,7 +218,7 @@ def list_questions(paper_id: str) -> list[dict[str, Any]]:
         .order("question_number")
         .execute()
     )
-    return result.data
+    return normalize_render_payload(result.data)
 
 
 @router.patch("/questions/{question_id}")
@@ -227,6 +228,8 @@ def update_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, 
     """
     supabase = get_supabase()
     updates = body.model_dump(exclude_none=True)
+    if isinstance(updates.get("text"), str):
+        updates["text"] = normalize_scientific_content(updates["text"])
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -241,7 +244,7 @@ def update_question(question_id: str, body: UpdateQuestionRequest) -> dict[str, 
     if not result.data:
         raise HTTPException(status_code=404, detail="Question not found")
 
-    return result.data[0]
+    return normalize_render_payload(result.data[0])
 
 
 @router.patch("/questions/{question_id}/hidden")
@@ -653,6 +656,8 @@ def approve_question(question_id: str, body: UpdateQuestionRequest) -> dict[str,
     """
     supabase = get_supabase()
     updates = body.model_dump(exclude_none=True)
+    if isinstance(updates.get("text"), str):
+        updates["text"] = normalize_scientific_content(updates["text"])
     updates["needs_review"] = False
     updates["review_reasons"] = []
     updates["hidden"] = False
@@ -665,7 +670,7 @@ def approve_question(question_id: str, body: UpdateQuestionRequest) -> dict[str,
     )
     if not result.data:
         raise HTTPException(status_code=404, detail="Question not found")
-    return result.data[0]
+    return normalize_render_payload(result.data[0])
 
 
 @router.get("/questions/diagram-review")

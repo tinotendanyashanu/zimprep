@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from db.client import get_supabase
 from db.models_subscription import DAILY_FREE_LIMIT
+from services.content_formatting import normalize_render_payload
 from services.marking import mark_attempt
 from services.quota import check_practice_quota
 
@@ -117,7 +118,7 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
         .maybe_single()
         .execute()
     )
-    return result.data if (result and result.data) else {}
+    return normalize_render_payload(result.data) if (result and result.data) else {}
 
 
 @router.get("/{attempt_id}")
@@ -133,7 +134,7 @@ def get_attempt(attempt_id: str) -> dict[str, Any]:
     )
     if not result or not result.data:
         raise HTTPException(status_code=404, detail="Attempt not found")
-    return result.data
+    return normalize_render_payload(result.data)
 
 
 class FlagAttemptRequest(BaseModel):

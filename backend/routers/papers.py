@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from db.client import get_supabase
 from services.adaptive import get_weak_topics, pick_next_question
+from services.content_formatting import normalize_render_payload
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -98,7 +99,7 @@ def list_questions_for_paper(paper_id: str) -> list[dict[str, Any]]:
     for q in questions:
         q["mcq_answer"] = mcq_map.get(q["id"])
 
-    return questions
+    return normalize_render_payload(questions)
 
 
 @router.get("/questions/next")
@@ -112,7 +113,7 @@ def next_question(
     question = pick_next_question(subject_id, student_id, topic, paper_number)
     if question is None:
         raise HTTPException(status_code=404, detail="No questions available")
-    return question
+    return normalize_render_payload(question)
 
 
 @router.get("/subjects/{subject_id}/topics")
