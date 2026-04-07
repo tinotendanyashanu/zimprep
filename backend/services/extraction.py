@@ -25,8 +25,8 @@ import json
 import logging
 import os
 import re
-import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 from typing import Any
 
@@ -99,18 +99,21 @@ def _extract_ocr_text_from_images(page_images: list[bytes]) -> list[str]:
         logger.info("pytesseract not installed — skipping OCR fallback")
         return [""] * len(page_images)
 
-    texts: list[str] = []
-    for i, img_bytes in enumerate(page_images):
+    def _ocr_single(args: tuple[int, bytes]) -> str:
+        i, img_bytes = args
         try:
             img = Image.open(BytesIO(img_bytes))
-            # Tesseract works best on grayscale
             if img.mode != "L":
                 img = img.convert("L")
-            text = pytesseract.image_to_string(img, lang="eng", config="--psm 6")
-            texts.append(text.strip())
+            return pytesseract.image_to_string(img, lang="eng", config="--psm 6").strip()
         except Exception as exc:
             logger.debug("OCR failed for page %d (non-critical): %s", i + 1, exc)
-            texts.append("")
+            return ""
+
+    max_workers = min(3, len(page_images)) or 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        texts = list(executor.map(_ocr_single, enumerate(page_images)))
+
     ocr_chars = sum(len(t) for t in texts)
     logger.info("OCR extracted %d total characters from %d pages", ocr_chars, len(texts))
     return texts
@@ -221,6 +224,26 @@ def _enhance_image(img_bytes: bytes, is_scanned: bool) -> bytes:
         return buf.getvalue()
 
 
+def _render_single_page(
+    pdf_bytes: bytes,
+    page_index: int,
+    dpi: int,
+    is_scanned: bool,
+) -> bytes:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        page = doc[page_index]
+        mat = fitz.Matrix(dpi / 72, dpi / 72)
+        pix = page.get_pixmap(matrix=mat)
+        if is_scanned:
+            raw = pix.tobytes("png")
+        else:
+            raw = pix.tobytes("jpeg", jpg_quality=95)
+        return _enhance_image(raw, is_scanned)
+    finally:
+        doc.close()
+
+
 def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]:
     """
     Render every PDF page to image bytes.
@@ -231,21 +254,24 @@ def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]
     """
     dpi = 200  # Higher than before (was 150) — critical for subscripts/superscripts
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    pages: list[bytes] = []
-    mat = fitz.Matrix(dpi / 72, dpi / 72)
+    total_pages = len(doc)
     mime = "image/png" if is_scanned else "image/jpeg"
-
-    for page in doc:
-        pix = page.get_pixmap(matrix=mat)
-        if is_scanned:
-            raw = pix.tobytes("png")
-        else:
-            raw = pix.tobytes("jpeg", jpg_quality=95)
-        # Enhance each page image
-        enhanced = _enhance_image(raw, is_scanned)
-        pages.append(enhanced)
-
     doc.close()
+
+    max_workers = min(3, total_pages) or 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        pages = list(
+            executor.map(
+                lambda page_index: _render_single_page(
+                    pdf_bytes=pdf_bytes,
+                    page_index=page_index,
+                    dpi=dpi,
+                    is_scanned=is_scanned,
+                ),
+                range(total_pages),
+            )
+        )
+
     return pages, mime
 
 
@@ -490,7 +516,15 @@ Return ONLY a valid JSON array. No preamble, no markdown fences, no explanation.
 # Maximum pages to send in a single Gemini call.
 # Gemini 2.5 Flash supports very large context — send as many pages as possible
 # for full paper context. Only split if we hit token limits.
-_MAX_PAGES_PER_CALL = 30
+_MAX_PAGES_PER_CALL = 10
+
+
+def _thinking_budget_for_page_count(page_count: int) -> int:
+    if page_count <= 5:
+        return 4096
+    if page_count <= 10:
+        return 8192
+    return 10240
 
 
 def _call_gemini_extract(
@@ -542,9 +576,8 @@ def _call_gemini_extract(
         EXTRACTION_SYSTEM_PROMPT,
         {
             "max_output_tokens": 65536,
-            # Thinking ENABLED — critical for reasoning about document layout,
-            # question boundaries, multi-page questions, and complex hierarchies.
-            "thinking_budget": 10240,
+            "thinking_budget": _thinking_budget_for_page_count(len(page_images)),
+            "batch_pages": len(page_images),
         },
     )
 
@@ -627,54 +660,64 @@ def _parse_questions_from_pages(
     Uses overlapping page windows to catch cross-page questions at batch
     boundaries.
     """
-    results: list[dict[str, Any]] = []
+    def _extract_batch(start_index: int) -> list[dict[str, Any]]:
+        batch_size = min(_MAX_PAGES_PER_CALL, len(page_images) - start_index)
+
+        while batch_size > 0:
+            end_index = min(start_index + batch_size, len(page_images))
+            batch = page_images[start_index:end_index]
+            batch_texts = embedded_texts[start_index:end_index] if embedded_texts else None
+
+            try:
+                questions, hit_limit = _call_gemini_extract(
+                    batch,
+                    page_offset=start_index,
+                    mime_type=mime_type,
+                    embedded_texts=batch_texts,
+                    pre_detection_context=pre_detection_context,
+                )
+            except Exception as exc:
+                raise RuntimeError(
+                    f"Extraction failed for pages {start_index + 1}–{end_index} after all retries: {exc}"
+                ) from exc
+
+            if hit_limit and batch_size > 1:
+                batch_size = max(1, batch_size // 2)
+                logger.warning(
+                    "Token limit hit at page %d; retrying batch with batch_size=%d",
+                    start_index + 1,
+                    batch_size,
+                )
+                continue
+
+            logger.info(
+                "Pages %d–%d: extracted %d questions (batch_size=%d)",
+                start_index + 1,
+                end_index,
+                len(questions),
+                batch_size,
+            )
+            return questions
+
+        return []
+
+    if not page_images:
+        return []
+
+    batch_starts: list[int] = []
     i = 0
-    batch_size = min(len(page_images), _MAX_PAGES_PER_CALL)
-
     while i < len(page_images):
-        end = min(i + batch_size, len(page_images))
-        batch = page_images[i:end]
-        batch_texts = embedded_texts[i:end] if embedded_texts else None
-
-        try:
-            questions, hit_limit = _call_gemini_extract(
-                batch,
-                page_offset=i,
-                mime_type=mime_type,
-                embedded_texts=batch_texts,
-                pre_detection_context=pre_detection_context,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Extraction failed for pages {i+1}–{end} after all retries: {exc}"
-            ) from exc
-
-        if hit_limit and batch_size > 1:
-            batch_size = max(1, batch_size // 2)
-            logger.warning(
-                "Token limit hit at page %d; retrying with batch_size=%d",
-                i + 1, batch_size,
-            )
-            continue
-
-        logger.info(
-            "Pages %d–%d: extracted %d questions (batch_size=%d)",
-            i + 1, end, len(questions), batch_size,
-        )
-        results.extend(questions)
-
-        # Advance with overlap to catch cross-page questions at boundaries
-        advance = len(batch)
-        if end < len(page_images) and advance > _OVERLAP_PAGES:
+        batch_starts.append(i)
+        advance = min(_MAX_PAGES_PER_CALL, len(page_images) - i)
+        if i + advance < len(page_images) and advance > _OVERLAP_PAGES:
             advance -= _OVERLAP_PAGES
         i += advance
 
-        # Try to grow batch size back up after successful smaller batch
-        if not hit_limit and batch_size < _MAX_PAGES_PER_CALL:
-            batch_size = min(_MAX_PAGES_PER_CALL, batch_size * 2)
+    max_workers = min(3, len(batch_starts)) or 1
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        batch_results = list(executor.map(_extract_batch, batch_starts))
 
-        if i < len(page_images):
-            time.sleep(1)
+    results = [question for batch in batch_results for question in batch]
 
     # Dedup questions from overlapping windows
     if len(page_images) > _MAX_PAGES_PER_CALL:
@@ -1411,10 +1454,15 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
         # OCR fallback for scanned PDFs — provides supplementary text
         # context that the LLM can cross-reference against the images
         if is_scanned:
-            ocr_texts = _extract_ocr_text_from_images(page_images)
-            # Use OCR text in place of embedded_texts for boundary detection
-            # and as supplementary context for the LLM
-            embedded_texts = ocr_texts
+            embedded_texts = [""] * len(page_images)
+            if low_density_pages:
+                low_density_indices = [page_num - 1 for page_num in low_density_pages]
+                ocr_inputs = [page_images[idx] for idx in low_density_indices]
+                ocr_texts = _extract_ocr_text_from_images(ocr_inputs)
+                for idx, text in zip(low_density_indices, ocr_texts):
+                    embedded_texts[idx] = text
+            else:
+                logger.info("Skipping OCR fallback — scanned PDF has no low-density pages")
 
         pre_detection_context = _build_pre_detection_context(
             embedded_texts, pages_with_images,
@@ -1457,9 +1505,20 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
                 paper_id, "; ".join(seq_gaps),
             )
 
+        pre_verification_issues = _validate_question_numbers(nested_questions, total_pages)
+        if pre_verification_issues:
+            logger.warning(
+                "Validation issues for paper %s before verification:\n  • %s",
+                paper_id, "\n  • ".join(pre_verification_issues),
+            )
+
         # ── Phase 3: Verification pass (uses Flash for model diversity) ─
         if nested_questions:
-            if len(page_images) <= _MAX_PAGES_PER_CALL:
+            if not seq_gaps and not pre_verification_issues:
+                logger.info(
+                    "Skipping verification pass — no sequence gaps or validation issues detected"
+                )
+            elif len(page_images) <= _MAX_PAGES_PER_CALL:
                 nested_questions = _verify_extraction(
                     page_images, mime_type, nested_questions
                 )

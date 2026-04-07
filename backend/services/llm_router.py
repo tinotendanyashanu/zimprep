@@ -42,25 +42,63 @@ class _GeminiLikeResponse:
 
 _PROVIDER_CHAIN = {
     "extraction": (
-        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 20),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 15),
-        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 20),
+        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "verification": (
-        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 20),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 15),
-        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 20),
+        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "mcq": (
-        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 20),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 15),
-        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 20),
+        _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
 }
 
 
 class _ProviderFallback(Exception):
     """Signal that the next provider in the chain should be tried."""
+
+
+def normalize_config(provider: str, config: dict[str, Any]) -> dict[str, Any]:
+    config = config or {}
+
+    if provider == "openai":
+        max_tokens = config.get("max_output_tokens", 4000)
+        if not isinstance(max_tokens, int):
+            try:
+                max_tokens = int(max_tokens)
+            except (TypeError, ValueError):
+                max_tokens = 4000
+
+        max_tokens = max(1, min(max_tokens, 16000))
+        normalized = {
+            "max_tokens": max_tokens,
+            "temperature": config.get("temperature", 0.2),
+        }
+        logger.info(
+            "OpenAI config normalized: max_tokens=%s temperature=%s",
+            normalized["max_tokens"],
+            normalized["temperature"],
+        )
+        return normalized
+
+    if provider == "gemini":
+        normalized = {
+            "max_output_tokens": config.get("max_output_tokens", 20000),
+            "thinking_config": config.get("thinking_config"),
+        }
+        logger.info(
+            "Gemini config normalized: max_output_tokens=%s thinking_config=%s",
+            normalized["max_output_tokens"],
+            "set" if normalized["thinking_config"] is not None else "none",
+        )
+        return normalized
+
+    return dict(config)
 
 
 def call_llm(model_type: str, contents: list, system_instruction: str, config: dict):
@@ -77,8 +115,9 @@ def call_llm(model_type: str, contents: list, system_instruction: str, config: d
         raise ValueError(f"Unsupported model_type: {model_type}")
 
     last_fallback_error: Exception | None = None
+    provider_chain = _get_provider_chain(model_type, config or {})
 
-    for provider_spec in _PROVIDER_CHAIN[model_type]:
+    for provider_spec in provider_chain:
         try:
             response = _call_provider_with_policy(
                 provider_spec=provider_spec,
@@ -100,6 +139,32 @@ def call_llm(model_type: str, contents: list, system_instruction: str, config: d
     raise RuntimeError("ALL_LLM_PROVIDERS_FAILED") from last_fallback_error
 
 
+def _get_provider_chain(model_type: str, config: dict[str, Any]) -> tuple[_ProviderSpec, ...]:
+    chain = _PROVIDER_CHAIN[model_type]
+
+    if model_type != "extraction":
+        return chain
+
+    batch_pages = config.get("batch_pages")
+    try:
+        batch_pages = int(batch_pages)
+    except (TypeError, ValueError):
+        batch_pages = None
+
+    if batch_pages is not None and batch_pages <= 5:
+        gemini_flash = next((spec for spec in chain if spec.model == "gemini-2.5-flash"), None)
+        gemini_pro = next((spec for spec in chain if spec.model == "gemini-2.5-pro"), None)
+        if gemini_flash and gemini_pro:
+            reordered = tuple(
+                [gemini_flash, gemini_pro]
+                + [spec for spec in chain if spec not in {gemini_flash, gemini_pro}]
+            )
+            logger.info("Using Flash-first extraction chain for small batch: batch_pages=%s", batch_pages)
+            return reordered
+
+    return chain
+
+
 def _call_provider_with_policy(
     *,
     provider_spec: _ProviderSpec,
@@ -107,6 +172,8 @@ def _call_provider_with_policy(
     system_instruction: str,
     config: dict[str, Any],
 ):
+    normalized_config = normalize_config(provider_spec.provider, config)
+
     for attempt in range(1, _MAX_ATTEMPTS_PER_PROVIDER + 1):
         started_at = time.monotonic()
         try:
@@ -115,7 +182,7 @@ def _call_provider_with_policy(
                     model=provider_spec.model,
                     contents=contents,
                     system_instruction=system_instruction,
-                    config=config,
+                    config=normalized_config,
                     timeout_seconds=provider_spec.timeout_seconds,
                 )
             elif provider_spec.provider == "openai":
@@ -123,7 +190,7 @@ def _call_provider_with_policy(
                     model=provider_spec.model,
                     contents=contents,
                     system_instruction=system_instruction,
-                    config=config,
+                    config=normalized_config,
                     timeout_seconds=provider_spec.timeout_seconds,
                 )
             else:
@@ -224,13 +291,14 @@ def _call_openai(
         contents=contents,
         system_instruction=system_instruction,
     )
-    create_kwargs = _build_openai_kwargs(config)
+    cfg = normalize_config("openai", config)
 
     response = _run_with_timeout(
         lambda: client.chat.completions.create(
             model=model,
             messages=messages,
-            **create_kwargs,
+            max_tokens=cfg["max_tokens"],
+            temperature=cfg["temperature"],
         ),
         timeout_seconds=timeout_seconds,
         provider_name=model,
@@ -265,16 +333,11 @@ def _build_gemini_config(
 
 
 def _build_openai_kwargs(config: dict[str, Any]) -> dict[str, Any]:
-    kwargs: dict[str, Any] = {}
-
-    if "max_output_tokens" in config:
-        kwargs["max_tokens"] = config["max_output_tokens"]
-    if "temperature" in config:
-        kwargs["temperature"] = config["temperature"]
-    if "top_p" in config:
-        kwargs["top_p"] = config["top_p"]
-
-    return kwargs
+    cfg = normalize_config("openai", config)
+    return {
+        "max_tokens": cfg["max_tokens"],
+        "temperature": cfg["temperature"],
+    }
 
 
 def _build_openai_messages(*, contents: list, system_instruction: str) -> list[dict[str, Any]]:
