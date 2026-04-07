@@ -31,7 +31,6 @@ from io import BytesIO
 from typing import Any
 
 import fitz  # PyMuPDF
-from google import genai
 from google.genai import types
 from PIL import Image, ImageEnhance, ImageFilter
 
@@ -49,14 +48,9 @@ except ImportError:
     _HAS_TESSERACT = False
 
 from db.client import get_supabase
+from services.llm_router import call_llm
 
 logger = logging.getLogger(__name__)
-
-_MAX_RETRIES = 6
-_RETRY_BASE_DELAY = 4  # seconds; doubles each attempt (4, 8, 16, 32, 64, 128)
-
-# ── Retry helpers ────────────────────────────────────────────────────────
-
 
 def _is_retryable_error(exc: Exception) -> bool:
     """Check if an exception is a transient error worth retrying."""
@@ -68,29 +62,6 @@ def _is_retryable_error(exc: Exception) -> bool:
         "disconnected", "connection", "timeout",
         "reset by peer", "broken pipe",
     ))
-
-
-def _gemini_call_with_retry(fn, *args, **kwargs):
-    """
-    Call a Gemini function, retrying on transient errors:
-    429 (rate limit), 503 (unavailable/overloaded), 500 (internal),
-    timeouts, and connection errors.
-    """
-    delay = _RETRY_BASE_DELAY
-    for attempt in range(_MAX_RETRIES):
-        try:
-            return fn(*args, **kwargs)
-        except Exception as exc:
-            if _is_retryable_error(exc) and attempt < _MAX_RETRIES - 1:
-                logger.warning(
-                    "Gemini transient error (attempt %d/%d) — waiting %ds: %s",
-                    attempt + 1, _MAX_RETRIES, delay, str(exc)[:200],
-                )
-                time.sleep(delay)
-                delay *= 2
-                continue
-            raise
-    raise RuntimeError("Gemini call failed after all retries")
 
 
 # ── Phase 1: Image Preprocessing ────────────────────────────────────────
@@ -530,11 +501,9 @@ def _call_gemini_extract(
     pre_detection_context: str = "",
 ) -> tuple[list[dict[str, Any]], bool]:
     """
-    Send page images to Gemini with thinking ENABLED for accurate extraction.
+    Send page images through the LLM router with thinking enabled for extraction.
     Returns (questions, hit_token_limit).
     """
-    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
-
     parts: list[Any] = []
 
     # Pre-detection hints (question boundaries + diagram pages) — gives the
@@ -567,17 +536,16 @@ def _call_gemini_extract(
         "Be thorough — check every page carefully. Return JSON array only."
     )
 
-    response = _gemini_call_with_retry(
-        client.models.generate_content,
-        model="gemini-2.5-pro",
-        contents=parts,
-        config=types.GenerateContentConfig(
-            system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=65536,
+    response = call_llm(
+        "extraction",
+        parts,
+        EXTRACTION_SYSTEM_PROMPT,
+        {
+            "max_output_tokens": 65536,
             # Thinking ENABLED — critical for reasoning about document layout,
             # question boundaries, multi-page questions, and complex hierarchies.
-            thinking_config=types.ThinkingConfig(thinking_budget=10240),
-        ),
+            "thinking_budget": 10240,
+        },
     )
 
     raw = _strip_json_fences(response.text or "")
@@ -652,7 +620,7 @@ def _parse_questions_from_pages(
     pre_detection_context: str = "",
 ) -> list[dict[str, Any]]:
     """
-    Extract questions from all pages using Gemini with full paper context.
+    Extract questions from all pages using the routed LLM chain with full paper context.
 
     Sends all pages together when possible (up to _MAX_PAGES_PER_CALL).
     Falls back to splitting if token limits are hit.
@@ -763,8 +731,6 @@ def _verify_extraction(
     if not extracted:
         return extracted
 
-    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
-
     parts: list[Any] = []
 
     # Add extracted JSON for review
@@ -785,19 +751,17 @@ def _verify_extraction(
         "Return the complete corrected JSON array."
     )
 
-    # Use a DIFFERENT model for verification (Flash) to avoid shared blind
-    # spots with the extraction model (Pro).  Flash is faster and cheaper,
-    # and its independent perspective catches errors Pro consistently misses.
+    # Run verification through the router so transient provider failures do not
+    # discard the initial extraction result.
     try:
-        response = _gemini_call_with_retry(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=parts,
-            config=types.GenerateContentConfig(
-                system_instruction=VERIFICATION_SYSTEM_PROMPT,
-                max_output_tokens=65536,
-                thinking_config=types.ThinkingConfig(thinking_budget=8192),
-            ),
+        response = call_llm(
+            "verification",
+            parts,
+            VERIFICATION_SYSTEM_PROMPT,
+            {
+                "max_output_tokens": 65536,
+                "thinking_budget": 8192,
+            },
         )
 
         raw = _strip_json_fences(response.text or "")
@@ -1275,11 +1239,10 @@ def _resolve_missing_mcq_answers(
     paper_id: str,
     mcq_questions: list[dict[str, Any]],
 ) -> None:
-    """Call Gemini to determine correct answers for MCQ questions without printed keys."""
+    """Call the routed LLM chain to determine MCQ answers without printed keys."""
     if not mcq_questions:
         return
 
-    client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
     supabase = get_supabase()
 
     parts: list[str] = []
@@ -1298,15 +1261,14 @@ def _resolve_missing_mcq_answers(
     prompt = "\n\n".join(parts)
 
     try:
-        response = _gemini_call_with_retry(
-            client.models.generate_content,
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=_MCQ_RESOLVE_SYSTEM_PROMPT,
-                max_output_tokens=512,
-                thinking_config=types.ThinkingConfig(thinking_budget=0),
-            ),
+        response = call_llm(
+            "mcq",
+            [prompt],
+            _MCQ_RESOLVE_SYSTEM_PROMPT,
+            {
+                "max_output_tokens": 512,
+                "thinking_budget": 0,
+            },
         )
         raw = _strip_json_fences(response.text or "")
         answers: dict[str, str] = json.loads(raw)
