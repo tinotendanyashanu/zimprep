@@ -37,27 +37,39 @@ from db.client import get_supabase
 
 logger = logging.getLogger(__name__)
 
-_MAX_RETRIES = 4
-_RETRY_BASE_DELAY = 2  # seconds; doubles each attempt (2, 4, 8, 16)
+_MAX_RETRIES = 6
+_RETRY_BASE_DELAY = 4  # seconds; doubles each attempt (4, 8, 16, 32, 64, 128)
 
-# ── Gemini retry wrapper ────────────────────────────────────────────────
+# ── Retry helpers ────────────────────────────────────────────────────────
+
+
+def _is_retryable_error(exc: Exception) -> bool:
+    """Check if an exception is a transient error worth retrying."""
+    msg = str(exc).lower()
+    return any(keyword in msg for keyword in (
+        "429", "503", "500",
+        "quota", "rate", "resource exhausted",
+        "unavailable", "overloaded", "high demand",
+        "disconnected", "connection", "timeout",
+        "reset by peer", "broken pipe",
+    ))
 
 
 def _gemini_call_with_retry(fn, *args, **kwargs):
     """
-    Call a Gemini function, retrying on 429 / rate-limit / quota errors.
+    Call a Gemini function, retrying on transient errors:
+    429 (rate limit), 503 (unavailable/overloaded), 500 (internal),
+    timeouts, and connection errors.
     """
     delay = _RETRY_BASE_DELAY
     for attempt in range(_MAX_RETRIES):
         try:
             return fn(*args, **kwargs)
         except Exception as exc:
-            msg = str(exc).lower()
-            is_retryable = "429" in msg or "quota" in msg or "rate" in msg or "resource exhausted" in msg
-            if is_retryable and attempt < _MAX_RETRIES - 1:
+            if _is_retryable_error(exc) and attempt < _MAX_RETRIES - 1:
                 logger.warning(
-                    "Gemini rate-limit (attempt %d/%d) — waiting %ds",
-                    attempt + 1, _MAX_RETRIES, delay,
+                    "Gemini transient error (attempt %d/%d) — waiting %ds: %s",
+                    attempt + 1, _MAX_RETRIES, delay, str(exc)[:200],
                 )
                 time.sleep(delay)
                 delay *= 2
@@ -201,9 +213,30 @@ CRITICAL RULES — READ CAREFULLY:
 
 5. MARKS: Parse from "[2]", "(2 marks)", "[2 marks]", etc. If no marks shown, use 0.
 
-6. MCQ: question_type="mcq" when the question has fixed letter options (A, B, C, D).
-   - mcq_options: [{letter: "A", text: "..."}, {letter: "B", text: "..."}]
-   - correct_option: ONLY if an answer key is printed in the paper. Otherwise null.
+6. QUESTION TYPES — high school exams have MANY types, not just MCQ:
+   a) MCQ (question_type="mcq"): Fixed letter options A, B, C, D.
+      - mcq_options: [{"letter": "A", "text": "..."}, ...]
+      - correct_option: ONLY if answer key is printed. Otherwise null.
+   b) WRITTEN (question_type="written"): Everything that is NOT MCQ. This includes:
+      - Short answer: "State two reasons...", "Name the...", "Define..."
+      - Long answer / essay: "Discuss...", "Explain in detail...", "Describe..."
+      - Calculations: "Calculate the...", "Find the value of...", "Solve..."
+        → Include ALL given values, formulas, and conditions in the text
+      - Structured questions: Multi-part questions with (a), (b), (c) sub-parts
+        → Each sub-part goes in sub_parts array with its own marks
+      - Source-based / comprehension: Questions based on a passage, extract, map, or data
+        → Include the FULL passage/extract text in the parent question's text field
+        → Sub-questions referencing the passage go in sub_parts
+      - Practical / experiment: "Design an experiment...", "Draw a labelled diagram..."
+      - Fill-in-the-blank: Preserve blanks as underscores _____ or "........"
+      - True/False with justification: Capture both the statement and "Give a reason" part
+      - Matching / pairing: Capture both columns in a Markdown table
+      - Graph/data interpretation: "Using the graph, determine...", "Plot a graph of..."
+        → Make sure the graph/table image is captured with has_image=true
+      - Proof / derivation: "Prove that...", "Show that...", "Derive..."
+
+   IMPORTANT: Most high school exam questions are WRITTEN, not MCQ.
+   Do NOT default to MCQ. Only use question_type="mcq" when there are explicit A/B/C/D options.
 
 7. DIAGRAMS/IMAGES:
    - has_image: true if there is any diagram, figure, graph, table-as-image, map, photograph, or illustration
@@ -290,14 +323,13 @@ def _call_gemini_extract(
 
     response = _gemini_call_with_retry(
         client.models.generate_content,
-        model="gemini-2.5-flash",
+        model="gemini-2.5-pro",
         contents=parts,
         config=types.GenerateContentConfig(
             system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=65536,  # Doubled from 32768 — more room for large papers
+            max_output_tokens=65536,
             # Thinking ENABLED — critical for reasoning about document layout,
             # question boundaries, multi-page questions, and complex hierarchies.
-            # This is the single biggest improvement for extraction quality.
             thinking_config=types.ThinkingConfig(thinking_budget=10240),
         ),
     )
@@ -337,11 +369,13 @@ def _parse_questions_from_pages(
                 embedded_texts=batch_texts,
             )
         except Exception as exc:
-            logger.error(
-                "Gemini extraction failed for pages %d–%d: %s — skipping batch",
-                i + 1, i + len(batch), exc,
-            )
-            questions, hit_limit = [], False
+            # _gemini_call_with_retry already retried transient errors 6 times.
+            # If we still fail, raise to abort the whole extraction so the paper
+            # gets status="error" and the admin can re-extract later — never
+            # silently skip pages which would produce an incomplete question set.
+            raise RuntimeError(
+                f"Extraction failed for pages {i+1}–{i+len(batch)} after all retries: {exc}"
+            ) from exc
 
         if hit_limit and batch_size > 1:
             batch_size = max(1, batch_size // 2)
@@ -378,16 +412,18 @@ You are given:
 Your job is to verify the extraction and return a CORRECTED version.
 
 CHECK FOR THESE COMMON ERRORS:
-1. MISSED QUESTIONS — compare the images carefully against the extracted list. Are any questions, sub-parts, or sub-sub-parts missing? If so, ADD them.
+1. MISSED QUESTIONS — compare the images carefully against the extracted list. Are any questions, sub-parts, or sub-sub-parts missing? Count the questions in the images and compare to the JSON. ADD any missing ones.
 2. WRONG NUMBERING — does question_number match what's printed? Are sub_parts labeled correctly?
-3. TRUNCATED TEXT — is any question text cut off or incomplete? Fix it.
+3. TRUNCATED TEXT — is any question text cut off or incomplete? Fix it. For written questions, ensure the FULL question stem is captured including all instructions, given values, and conditions.
 4. WRONG HIERARCHY — are sub-parts correctly nested? (a)(i) should be inside (a)'s sub_parts, not at the top level.
-5. MISSING MATH — is any math written as plain text instead of LaTeX? Convert to LaTeX.
-6. WRONG MARKS — do the marks match what's printed in the paper?
-7. MISSING DIAGRAMS — are there diagrams in the images that aren't flagged with has_image=true?
+5. MISSING MATH — is any math written as plain text instead of LaTeX? Convert to \(...\) or \[...\].
+6. WRONG MARKS — do the marks match what's printed in the paper? Check [2], (2 marks), etc.
+7. MISSING DIAGRAMS — are there diagrams, graphs, maps, tables-as-images, or illustrations in the images that aren't flagged with has_image=true?
 8. SECTION ERRORS — are sections (A, B, etc.) correctly assigned?
-9. MCQ ISSUES — are MCQ options complete and correctly labeled?
+9. MCQ vs WRITTEN — are question types correct? Only MCQ if there are explicit A/B/C/D options. Everything else (short answer, essay, calculation, structured, source-based, practical) is "written".
 10. PAGE NUMBERS — do page numbers match where questions actually appear?
+11. SOURCE MATERIAL — for comprehension/source-based questions, is the full passage/extract/data included in the parent question text?
+12. CALCULATION DATA — for calculation questions, are ALL given values, constants, and formulas included?
 
 IMPORTANT:
 - Return the COMPLETE corrected JSON array — not just the changes
@@ -435,7 +471,7 @@ def _verify_extraction(
     try:
         response = _gemini_call_with_retry(
             client.models.generate_content,
-            model="gemini-2.5-flash",
+            model="gemini-2.5-pro",
             contents=parts,
             config=types.GenerateContentConfig(
                 system_instruction=VERIFICATION_SYSTEM_PROMPT,
@@ -671,18 +707,29 @@ def _upload_image(
     path: str,
     content_type: str = "image/png",
 ) -> str | None:
-    """Upload bytes to Supabase Storage (question-images bucket) and return public URL."""
+    """Upload bytes to Supabase Storage with retry on transient errors."""
     supabase = get_supabase()
-    try:
-        supabase.storage.from_("question-images").upload(
-            path,
-            data,
-            file_options={"content-type": content_type, "upsert": "true"},
-        )
-        return supabase.storage.from_("question-images").get_public_url(path)
-    except Exception as exc:
-        logger.warning("Image upload failed (%s): %s", path, exc)
-        return None
+    delay = 2
+    for attempt in range(4):
+        try:
+            supabase.storage.from_("question-images").upload(
+                path,
+                data,
+                file_options={"content-type": content_type, "upsert": "true"},
+            )
+            return supabase.storage.from_("question-images").get_public_url(path)
+        except Exception as exc:
+            if _is_retryable_error(exc) and attempt < 3:
+                logger.warning(
+                    "Image upload retry (%s, attempt %d/4): %s",
+                    path, attempt + 1, str(exc)[:150],
+                )
+                time.sleep(delay)
+                delay *= 2
+                continue
+            logger.warning("Image upload failed (%s): %s", path, exc)
+            return None
+    return None
 
 
 def _upload_page_image(image_bytes: bytes, paper_id: str, page_index: int) -> str | None:
