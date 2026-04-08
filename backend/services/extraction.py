@@ -256,7 +256,7 @@ def _render_pages(pdf_bytes: bytes, is_scanned: bool) -> tuple[list[bytes], str]
     Scanned docs: 200 DPI + PNG (lossless, no double-compression artifacts)
     Born-digital: 200 DPI + JPEG at 95% quality
     """
-    dpi = 200  # Higher than before (was 150) — critical for subscripts/superscripts
+    dpi = 250 if is_scanned else 200  # Higher DPI for scanned docs — critical for subscripts
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     total_pages = len(doc)
     mime = "image/png" if is_scanned else "image/jpeg"
@@ -288,9 +288,9 @@ _PAGE_NUM_LABEL_RE = re.compile(r'\bpage\s+\d+\b', re.IGNORECASE)
 
 
 def _is_in_header_or_footer(block: tuple, page_height: float) -> bool:
-    """Check if a text block is in the top 12% or bottom 12% of the page."""
+    """Check if a text block is in the top 8% or bottom 8% of the page."""
     _, y0, _, y1, *_ = block
-    return y0 < page_height * 0.12 or y1 > page_height * 0.88
+    return y0 < page_height * 0.08 or y1 > page_height * 0.92
 
 
 def _is_isolated_page_number(text: str) -> bool:
@@ -351,6 +351,8 @@ _Q_BOUNDARY_RE = re.compile(
     r'(?:'
     r'(?:Q(?:uestion)?)\s*(\d{1,3})'      # Q1, Question 1
     r'|(\d{1,3})\s*[.)]\s+[A-Z]'          # 1. State..., 1) Calculate...
+    r'|(\d{1,3})\s{1,4}[A-Z][a-z]'        # 1 State, 2 Calculate, 10 Describe
+    r'|(\d{1,3})\s{1,4}\([a-z]\)'         # 1 (a), 2 (a) — question starts with sub-part
     r')'
     , re.IGNORECASE,
 )
@@ -386,7 +388,7 @@ def _detect_question_boundaries(texts: list[str]) -> str:
 
         # Detect question numbers
         for m in _Q_BOUNDARY_RE.finditer(text):
-            q_num = m.group(1) or m.group(2)
+            q_num = m.group(1) or m.group(2) or m.group(3) or m.group(4)
             if q_num and q_num not in seen_questions:
                 seen_questions.add(q_num)
                 boundaries.append(
@@ -488,7 +490,7 @@ def _extract_expected_questions_for_page(
         return []
     nums: set[int] = set()
     for m in _Q_BOUNDARY_RE.finditer(text):
-        q_num = m.group(1) or m.group(2)
+        q_num = m.group(1) or m.group(2) or m.group(3) or m.group(4)
         if q_num:
             nums.add(int(q_num))
     return sorted(nums)
@@ -645,9 +647,11 @@ def _basic_page_sanity(questions: list[dict[str, Any]]) -> bool:
 
 
 def _thinking_budget_for_page_count(page_count: int) -> int:
+    if page_count <= 1:
+        return 1024
     if page_count <= 3:
-        return 0
-    return 2048
+        return 2048
+    return 4096
 
 
 def _call_gemini_extract(
@@ -667,7 +671,7 @@ def _call_gemini_extract(
     Returns (questions, hit_token_limit).
     """
     if max_output_tokens is None:
-        max_output_tokens = 7000 if len(page_images) > 1 else 5000
+        max_output_tokens = 10000 if len(page_images) > 1 else 8000
 
     parts: list[Any] = []
 
@@ -872,21 +876,24 @@ def _parse_questions_from_pages(
 
         for attempt in range(_PAGE_MAX_RETRIES + 1):
             try:
+                # Use thinking on first attempt, escalate on retry
+                budget = 1024 if attempt == 0 else 2048
                 questions, _ = _call_gemini_extract(
                     [page_images[page_index]],
                     page_offset=page_index,
                     mime_type=mime_type,
                     embedded_texts=page_texts,
                     pre_detection_context=page_context,
-                    thinking_budget=0,
+                    thinking_budget=budget,
                     expected_questions=expected_qs,
                     last_seen_question=last_seen_question,
                 )
                 logger.info(
-                    "Page %d: extracted %d questions (attempt %d)",
+                    "Page %d: extracted %d questions (attempt %d, thinking=%d)",
                     page_index + 1,
                     len(questions),
                     attempt + 1,
+                    budget,
                 )
                 page_succeeded = True
                 break
@@ -955,6 +962,42 @@ def _parse_questions_from_pages(
             page_results[page_index] = []
             continue
 
+        # Rescue pass: if page returned 0 questions but embedded text says
+        # questions exist, retry with higher thinking budget and no validation
+        if not questions and expected_qs:
+            logger.warning(
+                "Page %d: 0 questions extracted but expected %s — running rescue pass",
+                page_index + 1,
+                expected_qs,
+            )
+            try:
+                rescue_qs, _ = _call_gemini_extract(
+                    [page_images[page_index]],
+                    page_offset=page_index,
+                    mime_type=mime_type,
+                    embedded_texts=page_texts,
+                    pre_detection_context=(
+                        page_context
+                        + f"RESCUE PASS: Previous extraction returned 0 questions. "
+                        f"Expected questions: {expected_qs}. "
+                        "Scan VERY carefully for ALL question content.\n\n"
+                    ),
+                    thinking_budget=2048,
+                    max_output_tokens=8000,
+                    expected_questions=None,  # relax validation for rescue
+                    last_seen_question=last_seen_question,
+                )
+                if rescue_qs:
+                    logger.info(
+                        "Page %d rescue pass recovered %d questions",
+                        page_index + 1,
+                        len(rescue_qs),
+                    )
+                    page_results[page_index] = rescue_qs
+                    questions = rescue_qs
+            except Exception as rescue_exc:
+                logger.warning("Page %d rescue pass failed: %s", page_index + 1, rescue_exc)
+
         # Update last_seen_question from this page's results
         page_qs = page_results.get(page_index, [])
         for q in page_qs:
@@ -982,6 +1025,81 @@ def _parse_questions_from_pages(
     results = _deduplicate_questions(ordered_results)
     if len(results) < before:
         logger.info("Dedup removed %d duplicate questions", before - len(results))
+
+    # ── Gap-filling pass: re-extract pages where missing questions should be ──
+    gaps = _detect_sequence_gaps(results)
+    if gaps and embedded_texts:
+        missing_nums: set[int] = set()
+        for q in results:
+            try:
+                missing_nums.discard(int(q.get("question_number", 0)))
+            except (ValueError, TypeError):
+                pass
+        # Parse missing numbers from gap strings
+        for gap_str in gaps:
+            for word in gap_str.split():
+                if word.isdigit():
+                    num = int(word)
+                    # Only count as missing if not already extracted
+                    extracted_nums = set()
+                    for q in results:
+                        try:
+                            extracted_nums.add(int(q.get("question_number", 0)))
+                        except (ValueError, TypeError):
+                            pass
+                    if num not in extracted_nums:
+                        missing_nums.add(num)
+
+        if missing_nums:
+            # Find which pages those missing questions are on
+            pages_to_retry: set[int] = set()
+            for page_idx in range(total_pages):
+                page_expected = expected_per_page.get(page_idx, [])
+                if any(n in missing_nums for n in page_expected):
+                    pages_to_retry.add(page_idx)
+
+            if pages_to_retry:
+                logger.info(
+                    "Gap-filling: re-extracting pages %s for missing questions %s",
+                    sorted(p + 1 for p in pages_to_retry),
+                    sorted(missing_nums),
+                )
+                for page_idx in sorted(pages_to_retry):
+                    try:
+                        target_nums = [n for n in expected_per_page.get(page_idx, []) if n in missing_nums]
+                        page_texts_gap = embedded_texts[page_idx: page_idx + 1] if embedded_texts else None
+                        gap_qs, _ = _call_gemini_extract(
+                            [page_images[page_idx]],
+                            page_offset=page_idx,
+                            mime_type=mime_type,
+                            embedded_texts=page_texts_gap,
+                            pre_detection_context=(
+                                f"GAP-FILLING PASS: Previous extraction MISSED question(s) {target_nums}. "
+                                f"Focus on finding these specific questions on this page. "
+                                f"Extract ALL questions visible, but especially {target_nums}.\n\n"
+                            ),
+                            thinking_budget=2048,
+                            max_output_tokens=8000,
+                            expected_questions=None,
+                            last_seen_question=None,
+                        )
+                        if gap_qs:
+                            # Only add questions that were actually missing
+                            for gq in gap_qs:
+                                try:
+                                    gq_num = int(gq.get("question_number", 0))
+                                    if gq_num in missing_nums:
+                                        results.append(gq)
+                                        missing_nums.discard(gq_num)
+                                        logger.info("Gap-filling recovered Q%d", gq_num)
+                                except (ValueError, TypeError):
+                                    pass
+                    except Exception as gap_exc:
+                        logger.warning("Gap-filling failed for page %d: %s", page_idx + 1, gap_exc)
+
+                # Re-deduplicate after gap-filling
+                results = _deduplicate_questions(results)
+
     if failed_pages and len(failed_pages) < total_pages:
         logger.warning(
             "Extraction produced no questions for page(s): %s",
@@ -1940,20 +2058,16 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             )
 
         page_images, mime_type = _render_pages(pdf_bytes, is_scanned)
-        logger.info("Rendered %d enhanced pages for paper %s (DPI=200)", len(page_images), paper_id)
+        render_dpi = 250 if is_scanned else 200
+        logger.info("Rendered %d enhanced pages for paper %s (DPI=%d)", len(page_images), paper_id, render_dpi)
 
-        # OCR fallback for scanned PDFs — provides supplementary text
-        # context that the LLM can cross-reference against the images
+        # OCR fallback for scanned PDFs — run on ALL pages to give the LLM
+        # supplementary text context for question boundary detection
         if is_scanned:
-            embedded_texts = [""] * len(page_images)
-            if low_density_pages:
-                low_density_indices = [page_num - 1 for page_num in low_density_pages]
-                ocr_inputs = [page_images[idx] for idx in low_density_indices]
-                ocr_texts = _extract_ocr_text_from_images(ocr_inputs)
-                for idx, text in zip(low_density_indices, ocr_texts):
-                    embedded_texts[idx] = text
-            else:
-                logger.info("Skipping OCR fallback — scanned PDF has no low-density pages")
+            logger.info("Running OCR on all %d pages of scanned PDF %s", len(page_images), paper_id)
+            embedded_texts = _extract_ocr_text_from_images(page_images)
+            ocr_page_count = sum(1 for t in embedded_texts if t)
+            logger.info("OCR produced text on %d/%d pages", ocr_page_count, len(page_images))
 
         pre_detection_context = _build_pre_detection_context(
             embedded_texts, pages_with_images,
@@ -2062,10 +2176,9 @@ def run_extraction(paper_id: str, pdf_bytes: bytes, subject_id: str) -> None:
             low_confidence_count=low_confidence_count,
         )
 
-        should_verify_async = (
-            bool(nested_questions)
-            and bool(seq_gaps or pre_verification_issues)
-        )
+        # Always run verification — silent misses (e.g. two questions on one
+        # line, sub-parts dropped) won't show up as sequence gaps
+        should_verify_async = bool(nested_questions)
         if should_verify_async:
             thread = threading.Thread(
                 target=_run_async_verification,

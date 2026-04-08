@@ -5,11 +5,17 @@ from typing import Any
 
 
 _QUESTION_START_RE = re.compile(r"^(\d{1,3})\s+(.+)$")
+# Also match "Q1 ...", "Question 1 ..." style
+_QUESTION_START_ALT_RE = re.compile(r"^Q(?:uestion)?\s*(\d{1,3})[.):\s]+(.+)$", re.IGNORECASE)
 _PAGE_NUM_ISOLATED_RE = re.compile(r"^\s*\d{1,3}\s*$")
 _PAGE_NUM_OF_RE = re.compile(r"^\s*\d+\s+of\s+\d+\s*$", re.IGNORECASE)
 _PAGE_NUM_LABEL_RE = re.compile(r"^\s*page\s+\d+(\s+of\s+\d+)?\s*$", re.IGNORECASE)
-_FOOTER_RE = re.compile(r"^(turn over|blank page|©|copyright\b)", re.IGNORECASE)
-_INSTRUCTION_HEADING_RE = re.compile(r"^(instructions?|information)\b", re.IGNORECASE)
+_PAGE_NUM_DASHED_RE = re.compile(r"^\s*[-–—]?\s*\d{1,3}\s*[-–—]?\s*$")
+_FOOTER_RE = re.compile(
+    r"^(turn over|blank page|©|copyright\b|\[turn over\]|ucles\b|zimsec\b)",
+    re.IGNORECASE,
+)
+_INSTRUCTION_HEADING_RE = re.compile(r"^(instructions?|information|read these)\b", re.IGNORECASE)
 _REFERENCE_HEADING_RE = re.compile(
     r"^(qualitative analysis|periodic table|data sheet|appendix|formulae|formulas)\b",
     re.IGNORECASE,
@@ -20,7 +26,7 @@ _OPTION_RE = re.compile(r"^([A-D])[\).:\-]?\s+(.+)$")
 _FIGURE_REF_RE = re.compile(r"\b(?:Fig(?:ure)?\.?)\s*\d+(?:\.\d+)?\b", re.IGNORECASE)
 _TABLE_REF_RE = re.compile(r"\bTable\s+\d+(?:\.\d+)?\b", re.IGNORECASE)
 _TOTAL_MARK_RE = re.compile(r"\[\s*Total\s*:\s*(\d+)\s*\]", re.IGNORECASE)
-_MARK_RE = re.compile(r"\[\s*(\d+)(?:\s*marks?)?\s*\]", re.IGNORECASE)
+_MARK_RE = re.compile(r"(?:\[\s*(\d+)(?:\s*marks?)?\s*\]|\(\s*(\d+)\s*marks?\s*\))", re.IGNORECASE)
 _PRACTICAL_SIGNAL_RE = re.compile(
     r"\b(experiment|apparatus|procedure|investigation|practical)\b",
     re.IGNORECASE,
@@ -50,6 +56,8 @@ def _prepare_lines(raw_text: str) -> list[str]:
             continue
         if _PAGE_NUM_LABEL_RE.match(line):
             continue
+        if _PAGE_NUM_DASHED_RE.match(line):
+            continue
         if _FOOTER_RE.match(line):
             continue
         prepared.append(line)
@@ -62,7 +70,7 @@ def _collect_question_chunks(lines: list[str]) -> list[tuple[int, list[str]]]:
     current_lines: list[str] = []
 
     for index, line in enumerate(lines):
-        question_match = _QUESTION_START_RE.match(line)
+        question_match = _QUESTION_START_RE.match(line) or _QUESTION_START_ALT_RE.match(line)
         if question_match:
             if current_number is not None:
                 chunks.append((current_number, current_lines))
@@ -74,12 +82,14 @@ def _collect_question_chunks(lines: list[str]) -> list[tuple[int, list[str]]]:
             continue
 
         if _REFERENCE_HEADING_RE.match(line) and not any(
-            _QUESTION_START_RE.match(future) for future in lines[index + 1 :]
+            _QUESTION_START_RE.match(future) or _QUESTION_START_ALT_RE.match(future)
+            for future in lines[index + 1 :]
         ):
             break
 
         if _INSTRUCTION_HEADING_RE.match(line) and not any(
-            _QUESTION_START_RE.match(future) for future in lines[index + 1 :]
+            _QUESTION_START_RE.match(future) or _QUESTION_START_ALT_RE.match(future)
+            for future in lines[index + 1 :]
         ):
             break
 
@@ -204,7 +214,9 @@ def _strip_marks(text: str) -> tuple[str, int]:
     else:
         mark_matches = _MARK_RE.findall(text)
         if len(mark_matches) == 1:
-            marks = int(mark_matches[0])
+            # findall returns tuples with two groups; pick the non-empty one
+            group1, group2 = mark_matches[0]
+            marks = int(group1 or group2)
         text = _MARK_RE.sub("", text)
 
     text = re.sub(r" +\n", "\n", text)

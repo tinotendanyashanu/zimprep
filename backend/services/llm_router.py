@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 _SUPPORTED_MODEL_TYPES = {"extraction", "verification", "mcq"}
 _MAX_ATTEMPTS_PER_PROVIDER = 2
-_MAX_PROVIDER_OUTPUT_TOKENS = 8000
+_MAX_PROVIDER_OUTPUT_TOKENS = 12000
 _CIRCUIT_BREAKER_THRESHOLD = 3
 _CIRCUIT_BREAKER_COOLDOWN_SECONDS = 60
 _provider_failures: dict[str, int] = {}
