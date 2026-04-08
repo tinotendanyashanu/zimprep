@@ -231,8 +231,24 @@ def autosave_session(session_id: str, body: SaveAnswersRequest) -> dict[str, Any
     if not session or not session.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    question_ids = set(body.answers.keys()) | set(body.answer_images.keys())
+    question_ids = list(set(body.answers.keys()) | set(body.answer_images.keys()))
+
+    # Filter out question IDs that no longer exist (e.g. after a re-extraction)
+    if question_ids:
+        existing = (
+            supabase.table("question")
+            .select("id")
+            .in_("id", question_ids)
+            .execute()
+        )
+        valid_ids = {row["id"] for row in existing.data}
+    else:
+        valid_ids = set()
+
     for question_id in question_ids:
+        if question_id not in valid_ids:
+            logger.warning("Autosave skipping stale question_id=%s", question_id)
+            continue
         supabase.table("attempt").upsert(
             {
                 "session_id": session_id,
@@ -267,9 +283,23 @@ def submit_session(
     if session_row.data["status"] != "active":
         raise HTTPException(status_code=409, detail="Session already submitted")
 
-    # Persist final answers
-    question_ids = set(body.answers.keys()) | set(body.answer_images.keys())
+    # Persist final answers, skipping stale question IDs from re-extractions
+    question_ids = list(set(body.answers.keys()) | set(body.answer_images.keys()))
+    if question_ids:
+        existing = (
+            supabase.table("question")
+            .select("id")
+            .in_("id", question_ids)
+            .execute()
+        )
+        valid_ids = {row["id"] for row in existing.data}
+    else:
+        valid_ids = set()
+
     for question_id in question_ids:
+        if question_id not in valid_ids:
+            logger.warning("Submit skipping stale question_id=%s", question_id)
+            continue
         supabase.table("attempt").upsert(
             {
                 "session_id": session_id,

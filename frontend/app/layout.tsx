@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { DM_Sans, Inter } from "next/font/google";
 import "katex/dist/katex.min.css";
 import "./globals.css";
@@ -18,11 +18,12 @@ const inter = Inter({
 export const metadata: Metadata = {
   title: "ZimPrep | Master the Art of Exams",
   description: "Experience the most cinematic and effective ZIMSEC preparation platform. Master examiner techniques with data-driven insights.",
-  viewport: {
-    width: "device-width",
-    initialScale: 1,
-    viewportFit: "cover",
-  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

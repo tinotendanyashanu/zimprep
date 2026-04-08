@@ -155,11 +155,11 @@ export default function DashboardPage() {
   const containerVars = {
     hidden: { opacity: 0 },
     show: { opacity: 1, transition: { staggerChildren: 0.05 } }
-  };
+  } as const;
   const itemVars = {
     hidden: { opacity: 0, y: 15 },
     show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-  };
+  } as const;
 
   // Empty Data Flow (New Student)
   if (!data?.has_data) {
