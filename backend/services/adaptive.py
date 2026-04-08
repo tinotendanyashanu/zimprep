@@ -32,7 +32,7 @@ def pick_next_question(
 
     Steps:
     1. Verify the subject belongs to the student's exam_board + level.
-    2. Fetch all ready questions for the subject (filtered by topic if given).
+    2. Fetch all processed questions for the subject (filtered by topic if given).
     3. Fetch student's recent attempt question IDs (last 20) to penalise.
     4. Compute per-topic fail ratios from past marked attempts.
     5. Score each question; pick via weighted random.
@@ -63,12 +63,11 @@ def pick_next_question(
             if student_level and subject_row.data.get("level") != student_level:
                 return None
 
-    # 2. Get all ready papers for this subject (optionally filtered by paper_number)
+    # 2. Get all papers for this subject (optionally filtered by paper_number)
     papers_query = (
         supabase.table("paper")
         .select("id")
         .eq("subject_id", subject_id)
-        .eq("status", "ready")
     )
     if paper_number is not None:
         papers_query = papers_query.eq("paper_number", paper_number)
@@ -77,8 +76,14 @@ def pick_next_question(
     if not paper_ids:
         return None
 
-    # 2. Fetch questions (optionally filtered by topic tag)
-    query = supabase.table("question").select("*").in_("paper_id", paper_ids)
+    # 2. Fetch questions (optionally filtered by topic tag), excluding hidden/failed
+    query = (
+        supabase.table("question")
+        .select("*")
+        .in_("paper_id", paper_ids)
+        .neq("diagram_status", "failed")
+        .eq("hidden", False)
+    )
     if topic:
         query = query.contains("topic_tags", [topic])
     questions = query.execute().data
@@ -174,7 +179,6 @@ def get_weak_topics(subject_id: str, student_id: str) -> list[dict[str, Any]]:
         supabase.table("paper")
         .select("id")
         .eq("subject_id", subject_id)
-        .eq("status", "ready")
         .execute()
     )
     paper_ids = [p["id"] for p in papers.data]

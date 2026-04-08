@@ -30,12 +30,12 @@ def list_subjects(
         query = query.eq("level", level)
     subjects = query.execute()
 
-    # Count ready papers per subject
-    ready_papers = (
-        supabase.table("paper").select("subject_id").eq("status", "ready").execute()
+    # Count papers per subject
+    all_papers = (
+        supabase.table("paper").select("subject_id").execute()
     )
     counts: dict[str, int] = {}
-    for p in ready_papers.data:
+    for p in all_papers.data:
         sid = p["subject_id"]
         counts[sid] = counts.get(sid, 0) + 1
 
@@ -47,13 +47,12 @@ def list_subjects(
 
 @router.get("/subjects/{subject_id}/papers")
 def list_papers_for_subject(subject_id: str) -> list[dict[str, Any]]:
-    """List ready papers for a given subject, newest first."""
+    """List all papers for a given subject, newest first."""
     supabase = get_supabase()
     result = (
         supabase.table("paper")
         .select("id, year, paper_number, exam_session, status")
         .eq("subject_id", subject_id)
-        .eq("status", "ready")
         .order("year", desc=True)
         .order("exam_session", desc=True)
         .execute()
@@ -118,13 +117,12 @@ def next_question(
 
 @router.get("/subjects/{subject_id}/topics")
 def list_topics_for_subject(subject_id: str) -> list[str]:
-    """Return distinct topic tags across all ready papers for a subject."""
+    """Return distinct topic tags across all papers for a subject."""
     supabase = get_supabase()
     papers = (
         supabase.table("paper")
         .select("id")
         .eq("subject_id", subject_id)
-        .eq("status", "ready")
         .execute()
     )
     paper_ids = [p["id"] for p in papers.data]
