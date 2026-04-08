@@ -90,6 +90,7 @@ def submit_attempt(body: SubmitAttemptRequest) -> dict[str, Any]:
             {
                 "student_answer": body.student_answer,
                 "answer_image_url": body.answer_image_url,
+                "extracted_text": None,
                 "ai_score": None,
                 "ai_feedback": None,
                 "ai_references": None,

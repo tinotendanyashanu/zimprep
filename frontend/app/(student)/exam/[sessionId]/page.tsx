@@ -294,7 +294,17 @@ export default function ExamSessionPage() {
         const qs = await getQuestionsForPaper(s.paper_id);
         setQuestions(qs);
         const saved = localStorage.getItem(`exam_${sessionId}`);
-        if (saved) { try { setAnswers(JSON.parse(saved)); } catch {} }
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (parsed && typeof parsed === "object" && ("answers" in parsed || "answerImages" in parsed)) {
+              setAnswers(parsed.answers ?? {});
+              setAnswerImages(parsed.answerImages ?? {});
+            } else {
+              setAnswers(parsed ?? {});
+            }
+          } catch {}
+        }
       } catch (e) {
         setError((e as Error).message);
       } finally {
@@ -309,7 +319,11 @@ export default function ExamSessionPage() {
     if (loading || session?.mode !== "exam") return;
     const interval = setInterval(() => {
       setTimeLeft((t) => {
-        if (t <= 1) { clearInterval(interval); handleSubmitExam(answersRef.current); return 0; }
+        if (t <= 1) {
+          clearInterval(interval);
+          handleSubmitExam(answersRef.current, answerImagesRef.current);
+          return 0;
+        }
         return t - 1;
       });
     }, 1000);
@@ -319,14 +333,17 @@ export default function ExamSessionPage() {
 
   // Autosave
   useEffect(() => {
-    if (Object.keys(answers).length > 0) localStorage.setItem(`exam_${sessionId}`, JSON.stringify(answers));
-  }, [answers, sessionId]);
+    if (Object.keys(answers).length > 0 || Object.keys(answerImages).length > 0) {
+      localStorage.setItem(`exam_${sessionId}`, JSON.stringify({ answers, answerImages }));
+    }
+  }, [answers, answerImages, sessionId]);
 
   useEffect(() => {
     if (loading) return;
     const interval = setInterval(() => {
-      if (Object.keys(answersRef.current).length > 0)
-        autosaveSession(sessionId, answersRef.current).catch(() => {});
+      if (Object.keys(answersRef.current).length > 0 || Object.keys(answerImagesRef.current).length > 0) {
+        autosaveSession(sessionId, answersRef.current, answerImagesRef.current).catch(() => {});
+      }
     }, 30_000);
     return () => clearInterval(interval);
   }, [loading, sessionId]);
@@ -347,11 +364,14 @@ export default function ExamSessionPage() {
   }, [questions, currentIdx]);
 
   const handleSubmitExam = useCallback(
-    async (currentAnswers: Record<string, string>) => {
+    async (
+      currentAnswers: Record<string, string>,
+      currentAnswerImages: Record<string, string>,
+    ) => {
       if (submitting) return;
       setSubmitting(true);
       try {
-        await submitSession(sessionId, currentAnswers);
+        await submitSession(sessionId, currentAnswers, currentAnswerImages);
         localStorage.removeItem(`exam_${sessionId}`);
         router.push(`/exam/${sessionId}/results`);
       } catch (e) {
@@ -624,6 +644,11 @@ export default function ExamSessionPage() {
                     imageUrl={answerImages[currentQ.id] ?? null}
                     onUpload={(url) => {
                       setAnswerImages((prev) => ({ ...prev, [currentQ.id]: url }));
+                      setPracticeResults((prev) => {
+                        const next = { ...prev };
+                        delete next[currentQ.id];
+                        return next;
+                      });
                     }}
                   />
                 )}
@@ -697,7 +722,10 @@ export default function ExamSessionPage() {
             </div>
             <div className="flex gap-3">
               <Button
-                onClick={() => { setShowConfirm(false); handleSubmitExam(answersRef.current); }}
+                onClick={() => {
+                  setShowConfirm(false);
+                  handleSubmitExam(answersRef.current, answerImagesRef.current);
+                }}
                 isLoading={submitting}
                 className="flex-1"
                 size="lg"

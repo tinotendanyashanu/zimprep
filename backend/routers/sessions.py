@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from db.client import get_supabase
 from services.content_formatting import normalize_render_payload
@@ -58,7 +58,8 @@ class CreateSessionRequest(BaseModel):
 
 
 class SaveAnswersRequest(BaseModel):
-    answers: dict[str, str]  # {question_id: answer_text}
+    answers: dict[str, str] = Field(default_factory=dict)  # {question_id: answer_text}
+    answer_images: dict[str, str] = Field(default_factory=dict)  # {question_id: public_image_url}
 
 
 class PracticeSessionRequest(BaseModel):
@@ -230,12 +231,14 @@ def autosave_session(session_id: str, body: SaveAnswersRequest) -> dict[str, Any
     if not session or not session.data:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    for question_id, answer_text in body.answers.items():
+    question_ids = set(body.answers.keys()) | set(body.answer_images.keys())
+    for question_id in question_ids:
         supabase.table("attempt").upsert(
             {
                 "session_id": session_id,
                 "question_id": question_id,
-                "student_answer": answer_text,
+                "student_answer": body.answers.get(question_id) or None,
+                "answer_image_url": body.answer_images.get(question_id) or None,
             },
             on_conflict="session_id,question_id",
         ).execute()
@@ -265,12 +268,14 @@ def submit_session(
         raise HTTPException(status_code=409, detail="Session already submitted")
 
     # Persist final answers
-    for question_id, answer_text in body.answers.items():
+    question_ids = set(body.answers.keys()) | set(body.answer_images.keys())
+    for question_id in question_ids:
         supabase.table("attempt").upsert(
             {
                 "session_id": session_id,
                 "question_id": question_id,
-                "student_answer": answer_text,
+                "student_answer": body.answers.get(question_id) or None,
+                "answer_image_url": body.answer_images.get(question_id) or None,
             },
             on_conflict="session_id,question_id",
         ).execute()
@@ -307,8 +312,8 @@ def get_results(session_id: str) -> dict[str, Any]:
     attempts_result = (
         supabase.table("attempt")
         .select(
-            "id, question_id, student_answer, ai_score, ai_feedback, "
-            "ai_references, marked_at, flagged"
+            "id, question_id, student_answer, answer_image_url, extracted_text, "
+            "ai_score, ai_feedback, ai_references, marked_at, flagged"
         )
         .eq("session_id", session_id)
         .execute()

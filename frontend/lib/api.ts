@@ -65,6 +65,7 @@ export type Attempt = {
   question_id: string;
   student_answer: string | null;
   answer_image_url: string | null;
+  extracted_text?: string | null;
   ai_score: number | null;
   ai_feedback: {
     correct_points: string[];
@@ -281,18 +282,26 @@ export const createSession = (studentId: string, paperId: string, mode: string) 
 export const getSession = (sessionId: string) =>
   apiFetch<Session>(`/sessions/${sessionId}`);
 
-export const autosaveSession = (sessionId: string, answers: Record<string, string>) =>
+export const autosaveSession = (
+  sessionId: string,
+  answers: Record<string, string>,
+  answerImages: Record<string, string> = {},
+) =>
   apiFetch<{ saved: boolean }>(`/sessions/${sessionId}/autosave`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answers, answer_images: answerImages }),
   });
 
-export const submitSession = (sessionId: string, answers: Record<string, string>) =>
+export const submitSession = (
+  sessionId: string,
+  answers: Record<string, string>,
+  answerImages: Record<string, string> = {},
+) =>
   apiFetch<{ status: string; session_id: string }>(`/sessions/${sessionId}/submit`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ answers }),
+    body: JSON.stringify({ answers, answer_images: answerImages }),
   });
 
 export const getResults = (sessionId: string) =>

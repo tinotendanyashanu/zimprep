@@ -17,6 +17,12 @@ from datetime import datetime, timezone
 from typing import Any
 
 from db.client import get_supabase
+from services.handwriting import (
+    canonical_answer_to_text,
+    interpret_handwritten_answer,
+    load_handwriting_result,
+    serialize_handwriting_result,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -132,6 +138,7 @@ def mark_attempt(attempt_id: str) -> None:
     subject = question["subject"]
     marks: int = int(question.get("marks", 0))
     student_answer: str | None = attempt.get("student_answer")
+    answer_image_url: str | None = attempt.get("answer_image_url")
     question_type: str = question.get("question_type", "written")
 
     result: dict[str, Any]
@@ -193,8 +200,42 @@ def mark_attempt(attempt_id: str) -> None:
             _update_attempt(attempt_id, result, marks)
             return
 
+    effective_answer = (student_answer or "").strip()
+    handwriting_result: dict[str, Any] | None = None
+
+    if answer_image_url:
+        handwriting_result = load_handwriting_result(attempt.get("extracted_text"))
+        if handwriting_result is None:
+            handwriting_result = interpret_handwritten_answer(
+                question_text=question.get("text", ""),
+                subject=subject.get("name", ""),
+                answer_image_url=answer_image_url,
+                optional_typed_input=student_answer,
+            )
+            supabase.table("attempt").update(
+                {"extracted_text": serialize_handwriting_result(handwriting_result)}
+            ).eq("id", attempt_id).execute()
+
+        effective_answer = canonical_answer_to_text(handwriting_result).strip() or effective_answer
+
+        if handwriting_result.get("status") == "resubmit":
+            result = {
+                "score": 0,
+                "feedback": {
+                    "correct_points": [],
+                    "missing_points": [],
+                    "examiner_note": (
+                        "Photo answer was too unclear to interpret reliably. "
+                        "Please resubmit a clearer image or add typed clarification."
+                    ),
+                },
+                "references": [],
+            }
+            _update_attempt(attempt_id, result, marks)
+            return
+
     # ── Empty / trivial answer gate ────────────────────────────────────────────
-    if not student_answer or not student_answer.strip():
+    if not effective_answer:
         result = {
             "score": 0,
             "feedback": {
@@ -207,7 +248,7 @@ def mark_attempt(attempt_id: str) -> None:
         _update_attempt(attempt_id, result, marks)
         return
 
-    if len(student_answer.strip()) < 3:
+    if len(effective_answer) < 3:
         result = {
             "score": 0,
             "feedback": {
@@ -221,25 +262,26 @@ def mark_attempt(attempt_id: str) -> None:
         return
 
     # ── Cache check ────────────────────────────────────────────────────────────
-    cached = (
-        supabase.table("attempt")
-        .select("ai_score, ai_feedback, ai_references")
-        .eq("question_id", question["id"])
-        .eq("student_answer", student_answer)
-        .not_.is_("marked_at", "null")
-        .neq("id", attempt_id)
-        .limit(1)
-        .execute()
-    )
-    if cached.data:
-        cached_row = cached.data[0]
-        result = {
-            "score": cached_row["ai_score"],
-            "feedback": cached_row["ai_feedback"],
-            "references": cached_row["ai_references"] or [],
-        }
-        _update_attempt(attempt_id, result, marks)
-        return
+    if not answer_image_url:
+        cached = (
+            supabase.table("attempt")
+            .select("ai_score, ai_feedback, ai_references")
+            .eq("question_id", question["id"])
+            .eq("student_answer", student_answer)
+            .not_.is_("marked_at", "null")
+            .neq("id", attempt_id)
+            .limit(1)
+            .execute()
+        )
+        if cached.data:
+            cached_row = cached.data[0]
+            result = {
+                "score": cached_row["ai_score"],
+                "feedback": cached_row["ai_feedback"],
+                "references": cached_row["ai_references"] or [],
+            }
+            _update_attempt(attempt_id, result, marks)
+            return
 
     # ── Gemini marking ─────────────────────────────────────────────────────────
     from google import genai
@@ -248,8 +290,13 @@ def mark_attempt(attempt_id: str) -> None:
     prompt = (
         f"Subject: {subject['name']} ({subject['level']})\n"
         f"Question ({marks} mark{'s' if marks != 1 else ''}): {question['text']}\n"
-        f"Student Answer: {student_answer}"
+        f"Student Answer: {effective_answer}"
     )
+    if handwriting_result:
+        prompt += (
+            "\nThis answer was interpreted from a handwritten photo submission. "
+            f"Interpretation confidence: {handwriting_result.get('confidence', 0.0):.2f}"
+        )
 
     try:
         client = genai.Client(api_key=os.environ["GOOGLE_AI_API_KEY"])
@@ -276,6 +323,13 @@ def mark_attempt(attempt_id: str) -> None:
     except Exception as exc:
         logger.error("Gemini marking failed for attempt %s: %s", attempt_id, exc, exc_info=True)
         result = dict(_FALLBACK_RESULT)
+
+    if handwriting_result and handwriting_result.get("status") == "confirm":
+        feedback = result.get("feedback") or {}
+        note = str(feedback.get("examiner_note", "") or "").strip()
+        suffix = "Answer interpreted from photo with medium confidence."
+        feedback["examiner_note"] = f"{note} {suffix}".strip() if note else suffix
+        result["feedback"] = feedback
 
     _update_attempt(attempt_id, result, marks)
 
