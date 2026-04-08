@@ -54,21 +54,21 @@ class _GeminiLikeResponse:
 
 _PROVIDER_CHAIN = {
     "extraction": (
-        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-sonnet-4-5-20250514", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 40),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "verification": (
-        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-sonnet-4-5-20250514", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 40),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
     "mcq": (
-        _ProviderSpec("Claude Sonnet", "anthropic", "claude-3-5-sonnet", 40),
+        _ProviderSpec("Claude Sonnet", "anthropic", "claude-sonnet-4-5-20250514", 40),
         _ProviderSpec("Gemini Pro", "gemini", "gemini-2.5-pro", 40),
-        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 25),
+        _ProviderSpec("Gemini Flash", "gemini", "gemini-2.5-flash", 40),
         _ProviderSpec("OpenAI GPT-4o", "openai", "gpt-4o", 40),
     ),
 }
@@ -589,6 +589,9 @@ def _classify_error(exc: Exception) -> str:
     message = str(exc).lower()
 
     if any(token in message for token in ("503", "unavailable", "overloaded", "high demand")):
+        return "unavailable"
+
+    if any(token in message for token in ("404", "not_found", "not found", "model not found")):
         return "unavailable"
 
     if any(token in message for token in ("429", "rate limit", "resource exhausted", "quota")):
