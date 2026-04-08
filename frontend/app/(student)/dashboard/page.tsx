@@ -249,10 +249,10 @@ export default function DashboardPage() {
 
         {/* 1. Master Hero Section */}
         <motion.div variants={itemVars} className="mb-8">
-          <div className="bg-gradient-to-br from-blue-600 to-indigo-700 rounded-[2.5rem] p-8 md:p-10 text-white relative overflow-hidden shadow-2xl shadow-blue-600/20">
+          <div className="bg-gradient-to-br from-primary to-emerald-700 rounded-[2.5rem] p-8 md:p-10 text-white relative overflow-hidden shadow-2xl shadow-primary/20">
             {/* Soft background aesthetic blurs */}
             <div className="absolute -top-20 -right-20 w-80 h-80 bg-white/10 rounded-full blur-3xl pointer-events-none" />
-            <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-indigo-400/20 rounded-full blur-2xl pointer-events-none" />
+            <div className="absolute -bottom-10 -left-10 w-40 h-40 bg-emerald-300/20 rounded-full blur-2xl pointer-events-none" />
             
             <div className="relative z-10 flex flex-col md:flex-row justify-between items-center md:items-end gap-10">
               <div className="flex-1 text-center md:text-left">
@@ -262,7 +262,7 @@ export default function DashboardPage() {
                 <h1 className="text-4xl md:text-5xl font-black tracking-tight mb-4 leading-tight">
                   {ri.readiness_index >= 75 ? "Keep it up, Scholar!" : ri.readiness_index >= 50 ? "Making solid progress!" : "Time to level up!"}
                 </h1>
-                <p className="text-blue-100 text-base md:text-lg font-medium max-w-sm mx-auto md:mx-0 leading-relaxed mb-8">
+                <p className="text-emerald-50/90 text-base md:text-lg font-medium max-w-sm mx-auto md:mx-0 leading-relaxed mb-8">
                   {getRITagline(ri.readiness_index, currentSubjectName)}
                 </p>
                 
@@ -272,14 +272,14 @@ export default function DashboardPage() {
                     <Flame className="h-6 w-6 text-orange-400 drop-shadow-md" fill="currentColor" />
                     <div className="flex flex-col text-left">
                       <span className="text-sm font-black leading-none mb-1">{streak.current} Days</span>
-                      <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Active Streak</span>
+                      <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Active Streak</span>
                     </div>
                   </div>
                   <div className="bg-white/10 backdrop-blur-md px-5 py-3 rounded-2xl flex items-center gap-3 border border-white/10">
                     <Award className="h-6 w-6 text-emerald-400 drop-shadow-md" />
                     <div className="flex flex-col text-left">
                       <span className="text-sm font-black leading-none mb-1">{ri.accuracy}%</span>
-                      <span className="text-[10px] font-bold text-blue-200 uppercase tracking-widest">Core Mastey</span>
+                      <span className="text-[10px] font-bold text-emerald-100 uppercase tracking-widest">Core Mastey</span>
                     </div>
                   </div>
                 </div>
