@@ -1,9 +1,10 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
-import { ArrowRight, CheckCircle2 } from "lucide-react";
+import { ArrowRight, CheckCircle2, FileText, Sparkles, BookOpen } from "lucide-react";
 import {
   Accordion,
   AccordionContent,
@@ -11,8 +12,50 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Card } from "@/components/ui/card";
+import { getSubjects, type Subject } from "@/lib/api";
+
+const LEVEL_LABELS: Record<string, string> = {
+  Grade7: "Grade 7",
+  O: "O-Level",
+  A: "A-Level",
+  IGCSE: "IGCSE",
+  AS_Level: "AS Level",
+  A_Level: "A Level",
+};
+
+const LEVEL_GRADIENTS: Record<string, string> = {
+  Grade7: "from-sky-500/10 to-cyan-500/10",
+  O: "from-emerald-500/10 to-teal-500/10",
+  A: "from-purple-500/10 to-violet-500/10",
+  IGCSE: "from-blue-500/10 to-indigo-500/10",
+  AS_Level: "from-indigo-500/10 to-blue-500/10",
+  A_Level: "from-violet-500/10 to-purple-500/10",
+};
+
+const LEVEL_TEXT_COLORS: Record<string, string> = {
+  Grade7: "text-sky-600",
+  O: "text-emerald-600",
+  A: "text-purple-600",
+  IGCSE: "text-blue-600",
+  AS_Level: "text-indigo-600",
+  A_Level: "text-violet-600",
+};
 
 export default function Home() {
+  const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [subjectsLoaded, setSubjectsLoaded] = useState(false);
+
+  useEffect(() => {
+    getSubjects()
+      .then((data) => {
+        setSubjects(data);
+        setSubjectsLoaded(true);
+      })
+      .catch(() => setSubjectsLoaded(true));
+  }, []);
+
+  const liveSubjects = subjects.filter((s) => s.paper_count > 0);
+
   return (
     <div className="flex flex-col min-h-screen">
       
@@ -222,6 +265,88 @@ export default function Home() {
             </div>
          </div>
       </section>
+
+      {/* 
+        SECTION 6.5: DYNAMIC SUBJECT SHOWCASE
+        Sales-driven — Admin-added subjects appear here automatically.
+      */}
+      {subjectsLoaded && liveSubjects.length > 0 && (
+        <section className="py-24 md:py-32 px-6 bg-gradient-to-b from-white to-zinc-50/80">
+          <div className="max-w-6xl mx-auto">
+            {/* Section Header */}
+            <div className="text-center mb-16">
+              <div className="inline-flex items-center gap-2 bg-primary/10 text-primary text-xs font-bold px-4 py-2 rounded-full mb-6">
+                <Sparkles className="w-4 h-4" />
+                {liveSubjects.length} Subject{liveSubjects.length !== 1 ? "s" : ""} Ready to Practice
+              </div>
+              <h2 className="text-calm-h2 mb-4">Explore our subjects.</h2>
+              <p className="text-calm-body max-w-2xl mx-auto">
+                Real past papers, examiner&#8209;style AI marking, and progress tracking — all ready for you now.
+              </p>
+            </div>
+
+            {/* Subject Cards Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-12">
+              {liveSubjects.slice(0, 6).map((sub, i) => (
+                <Link
+                  key={sub.id}
+                  href="/register"
+                  className="group block"
+                  style={{ animationDelay: `${i * 80}ms` }}
+                >
+                  <div className={`relative bg-white border border-border rounded-[1.5rem] p-7 h-full flex flex-col hover:border-primary/40 hover:shadow-2xl hover:shadow-primary/5 hover:-translate-y-1 transition-all duration-300 overflow-hidden`}>
+                    {/* Subtle gradient accent */}
+                    <div className={`absolute top-0 right-0 w-28 h-28 bg-gradient-to-br ${LEVEL_GRADIENTS[sub.level] ?? "from-gray-500/10 to-gray-400/10"} rounded-bl-[4rem] pointer-events-none`} />
+
+                    <div className="relative z-10 flex items-start justify-between mb-5">
+                      <div>
+                        <h3 className="font-bold text-xl text-foreground group-hover:text-primary transition-colors leading-tight">
+                          {sub.name}
+                        </h3>
+                        <p className="text-xs text-muted-foreground font-mono mt-1">
+                          {sub.exam_board === "zimsec" ? "ZIMSEC" : "Cambridge"} · {LEVEL_LABELS[sub.level] ?? sub.level}
+                        </p>
+                      </div>
+                      <span className="bg-emerald-100 text-emerald-700 text-[10px] font-black uppercase tracking-widest px-3 py-1.5 rounded-full border border-emerald-200 shadow-sm flex items-center gap-1.5 shrink-0">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        Live
+                      </span>
+                    </div>
+
+                    <div className="relative z-10 flex items-center gap-2 mb-6">
+                      <FileText className={`w-4 h-4 ${LEVEL_TEXT_COLORS[sub.level] ?? "text-primary"}`} />
+                      <span className="text-sm font-semibold text-foreground">
+                        {sub.paper_count} Past Paper{sub.paper_count !== 1 ? "s" : ""}
+                      </span>
+                    </div>
+
+                    <div className="relative z-10 mt-auto flex items-center justify-between pt-4 border-t border-border/50">
+                      <span className="text-xs font-bold text-primary flex items-center gap-1 group-hover:gap-2 transition-all">
+                        Start Free Trial
+                        <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+                      </span>
+                      <span className="text-[10px] font-bold text-muted-foreground bg-zinc-100 px-2.5 py-1 rounded-full">
+                        AI Marking
+                      </span>
+                    </div>
+                  </div>
+                </Link>
+              ))}
+            </div>
+
+            {/* View All CTA */}
+            <div className="text-center">
+              <Button variant="outline" size="lg" asChild className="rounded-full px-10 h-12 text-base font-semibold border-2 hover:border-primary hover:text-primary transition-colors">
+                <Link href="/subjects" className="flex items-center gap-2">
+                  <BookOpen className="w-5 h-5" />
+                  View All Subjects &amp; Coverage
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* 
         SECTION 7: SOCIAL PROOF

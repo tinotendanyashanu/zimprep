@@ -88,7 +88,7 @@ function QuestionImage({ url }: { url: string }) {
       </div>
       {lightbox && (
         <div
-          className="fixed inset-0 bg-black/90 z-[100] flex items-center justify-center p-4 cursor-zoom-out backdrop-blur-sm"
+          className="fixed inset-0 bg-black/90 z-100 flex items-center justify-center p-4 cursor-zoom-out backdrop-blur-sm"
           onClick={() => setLightbox(false)}
         >
            <div className="absolute top-6 right-6">
@@ -122,7 +122,7 @@ function PracticeFeedback({ result, question, onNext, onRetry }: {
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: "spring", stiffness: 300, damping: 25 }}
       className={cn(
-      "rounded-[2rem] p-6 sm:p-8 space-y-6 shadow-xl border-2 relative overflow-hidden",
+      "rounded-4xl p-6 sm:p-8 space-y-6 shadow-xl border-2 relative overflow-hidden",
       isGood ? "border-emerald-200 bg-emerald-50" : "border-red-200 bg-red-50"
     )}>
       {isGood && <div className="absolute top-0 right-0 w-32 h-32 bg-emerald-300/20 blur-3xl rounded-full" />}
@@ -413,7 +413,7 @@ export default function ExamSessionPage() {
   if (loading) return (
     <div className="flex bg-[#F8F9FA] items-center justify-center min-h-screen flex-col gap-6">
       <div className="w-16 h-16 rounded-3xl bg-primary/20 flex items-center justify-center">
-         <div className="w-8 h-8 rounded-full border-[4px] border-primary/30 border-t-primary animate-spin" />
+         <div className="w-8 h-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
       </div>
       <p className="text-sm font-black uppercase tracking-widest text-gray-400">Loading Environment</p>
     </div>
@@ -715,7 +715,7 @@ export default function ExamSessionPage() {
             
             {/* Nav Controls */}
             {!practiceResults[currentQ.id] && (
-              <div className="fixed inset-x-0 bottom-0 z-[45] bg-white/80 backdrop-blur-xl border-t border-black/5 p-4 sm:static sm:bg-transparent sm:backdrop-blur-none sm:border-0 sm:p-0 flex gap-4 mt-auto">
+              <div className="fixed inset-x-0 bottom-0 z-45 bg-white/80 backdrop-blur-xl border-t border-black/5 p-4 sm:static sm:bg-transparent sm:backdrop-blur-none sm:border-0 sm:p-0 flex gap-4 mt-auto">
                 <button
                   disabled={currentIdx === 0}
                   onClick={() => { setCurrentIdx((i) => i - 1); setAnswerTab("text"); }}

@@ -13,7 +13,7 @@ import { MathText } from "@/components/math-text";
 import { cn } from "@/lib/utils";
 import { useStudent } from "@/lib/student-context";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, Flame, Target, Zap, ArrowRight, CheckCircle2, AlertTriangle, Image as ImageIcon, Check } from "lucide-react";
+import { ChevronLeft, Flame, Target as TargetIcon, Zap, ArrowRight, CheckCircle2, AlertTriangle, Image as ImageIcon, Check } from "lucide-react";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -145,7 +145,7 @@ function FeedbackCard({ result, question, onNext, onFlag, flagged }: {
           )}
           {result.ai_feedback.missing_points.length > 0 && (
             <div className={result.ai_feedback.correct_points.length > 0 ? "pt-2" : ""}>
-              <p className="font-extrabold text-red-600 mb-2 flex items-center gap-1.5"><Target className="h-4 w-4" /> Missing Points</p>
+              <p className="font-extrabold text-red-600 mb-2 flex items-center gap-1.5"><TargetIcon className="h-4 w-4" /> Missing Points</p>
               <ul className="space-y-1.5 pl-5 border-l-[3px] border-red-300 text-gray-600">
                 {result.ai_feedback.missing_points.map((p, i) => (
                   <li key={i} className="font-medium"><MathText text={p} /></li>
@@ -365,7 +365,7 @@ export default function PracticePage() {
           {upgradeOverlay}
           <motion.div variants={itemVars} className="text-center sm:text-left flex flex-col sm:flex-row items-center gap-6">
             <div className="w-16 h-16 bg-blue-100 rounded-[1.5rem] flex items-center justify-center text-blue-600 shrink-0">
-               <Target className="w-8 h-8" />
+               <TargetIcon className="w-8 h-8" />
             </div>
             <div>
               <h1 className="text-3xl font-black text-gray-900 tracking-tight">Practice Arena</h1>
@@ -487,7 +487,7 @@ export default function PracticePage() {
               className={cn(premiumCard, "p-6 flex flex-col text-left hover:scale-[1.02] active:scale-[0.98] transition-all group outline-none sm:col-span-2 border-2 border-transparent hover:border-primary/20 bg-gradient-to-br from-white to-primary/5")}
             >
                <div className="w-12 h-12 bg-primary/10 text-primary rounded-2xl flex items-center justify-center mb-4 group-hover:bg-primary group-hover:text-white transition-colors">
-                  <Target className="w-6 h-6" />
+                  <TargetIcon className="w-6 h-6" />
                 </div>
               <p className="font-extrabold text-xl text-gray-900 group-hover:text-primary transition-colors">
                 All Papers (Endless Mode)

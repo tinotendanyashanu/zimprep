@@ -277,7 +277,7 @@ export default function ExamSelectPage() {
               </div>
             </motion.div>
 
-            <motion.div variants={itemVars} className={cn(premiumCard, "p-8 sm:p-10 bg-gradient-to-br from-white to-indigo-50/50")}>
+            <motion.div variants={itemVars} className={cn(premiumCard, "p-8 sm:p-10 bg-linear-to-br from-white to-indigo-50/50")}>
               <div className="flex flex-col md:flex-row gap-8 items-start md:items-center">
                  <div className="flex-1 space-y-2">
                     <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 bg-indigo-50 px-3 py-1.5 rounded-xl w-fit">Target Logged</p>
