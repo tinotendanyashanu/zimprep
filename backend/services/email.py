@@ -137,3 +137,43 @@ def send_weekly_digest_email(email: str, name: str, stats: dict[str, Any]) -> No
     <p>— The ZimPrep Team</p>
     """
     _send(email, "Your ZimPrep Weekly Digest", body)
+
+
+def send_waitlist_notification(
+    email: str,
+    phone_number: str,
+    source_page: str,
+    already_joined: bool = False,
+) -> None:
+    """Notify the team when a visitor joins or updates the waitlist."""
+    notify_email = os.getenv("WAITLIST_NOTIFY_EMAIL", "").strip()
+    if not notify_email:
+        logger.info(
+            "[WAITLIST] email=%s phone=%s source=%s already_joined=%s",
+            email,
+            phone_number,
+            source_page,
+            already_joined,
+        )
+        return
+
+    status = "updated an existing waitlist entry" if already_joined else "joined the waitlist"
+    body = f"""
+    <h2>New waitlist activity</h2>
+    <p>A visitor {status}.</p>
+    <table style="border-collapse:collapse;margin:16px 0;">
+      <tr>
+        <td style="padding:8px 16px;background:#f3f4f6;font-weight:bold;">Email</td>
+        <td style="padding:8px 16px;">{email}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 16px;background:#f3f4f6;font-weight:bold;">Phone</td>
+        <td style="padding:8px 16px;">{phone_number}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 16px;background:#f3f4f6;font-weight:bold;">Source page</td>
+        <td style="padding:8px 16px;">{source_page}</td>
+      </tr>
+    </table>
+    """
+    _send(notify_email, "ZimPrep waitlist signup", body)

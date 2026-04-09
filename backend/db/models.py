@@ -72,6 +72,15 @@ class Parent(BaseModel):
     created_at: datetime
 
 
+class WaitlistEntry(BaseModel):
+    id: str
+    email: str
+    phone_number: str
+    source_page: str
+    created_at: datetime
+    updated_at: datetime
+
+
 class Session(BaseModel):
     id: str
     student_id: str

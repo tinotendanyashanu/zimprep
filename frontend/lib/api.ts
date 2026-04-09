@@ -231,6 +231,23 @@ export type ParentGoals = {
   updated_at: string | null;
 };
 
+export type JoinWaitlistPayload = {
+  email: string;
+  phone_number: string;
+  source_page: string;
+};
+
+export type JoinWaitlistResponse = {
+  success: boolean;
+  already_joined: boolean;
+  entry: {
+    id?: string;
+    email: string;
+    phone_number: string;
+    source_page: string;
+  };
+};
+
 // ── Core fetch helper ──────────────────────────────────────────────────────────
 
 export class ApiError extends Error {
@@ -503,3 +520,10 @@ export const checkParentAlerts = (parentId: string, token?: string) =>
       headers: token ? { Authorization: `Bearer ${token}` } : {},
     },
   );
+
+export const joinWaitlist = (payload: JoinWaitlistPayload) =>
+  apiFetch<JoinWaitlistResponse>("/waitlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
