@@ -2,6 +2,7 @@ import Link from "next/link";
 import { CheckCircle2, XCircle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { WaitlistHeroCTA } from "@/components/waitlist-hero-cta";
 import { TIER_CONFIG } from "@/lib/subscription";
 
 // Feature rows shown on every card
@@ -62,6 +63,13 @@ export default function PricingPage() {
             <p className="text-calm-body max-w-2xl mx-auto">
               Start free. Upgrade when you need more subjects or exam mode. No hidden fees. Cancel anytime.
             </p>
+            <div className="mt-8">
+              <WaitlistHeroCTA
+                compact
+                buttonClassName="h-14 px-10 text-lg rounded-full w-full sm:w-auto"
+                formClassName="mt-5 rounded-3xl border border-border/60 bg-background p-5 text-left shadow-sm"
+              />
+            </div>
           </div>
 
           <div className="max-w-6xl mx-auto grid md:grid-cols-4 gap-6">

@@ -12,6 +12,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Card } from "@/components/ui/card";
+import { WaitlistHeroCTA } from "@/components/waitlist-hero-cta";
 import { getSubjects, type Subject } from "@/lib/api";
 
 const LEVEL_LABELS: Record<string, string> = {
@@ -80,6 +81,12 @@ export default function Home() {
             <Button size="lg" variant="ghost" asChild className="btn-secondary h-14 px-10 text-lg rounded-full text-foreground hover:bg-zinc-100 w-full sm:w-auto">
               <Link href="/how-it-works">View Demo</Link>
             </Button>
+          </div>
+          <div className="mb-16">
+            <WaitlistHeroCTA
+              buttonClassName="h-14 px-10 text-lg rounded-full w-full sm:w-auto"
+              formClassName="mt-5 rounded-3xl border border-border/60 bg-background/80 p-5 text-left shadow-lg backdrop-blur"
+            />
           </div>
           
           {/* Hero Visual - Product First */}

@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { WaitlistHeroCTA } from "@/components/waitlist-hero-cta";
 import { FileText, BarChart3, GraduationCap } from "lucide-react";
 
 export default function HowItWorksPage() {
@@ -15,6 +16,13 @@ export default function HowItWorksPage() {
             <p className="text-calm-body max-w-2xl mx-auto">
               A disciplined, three-step process designed to move you from uncertainty to exam readiness.
             </p>
+            <div className="mt-8">
+              <WaitlistHeroCTA
+                compact
+                buttonClassName="h-14 px-10 text-lg rounded-full w-full sm:w-auto"
+                formClassName="mt-5 rounded-3xl border border-border/60 bg-background p-5 text-left shadow-sm"
+              />
+            </div>
           </div>
         </section>
 

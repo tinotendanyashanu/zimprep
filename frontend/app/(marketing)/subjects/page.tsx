@@ -12,6 +12,7 @@ import {
   Sparkles,
   Loader2,
 } from "lucide-react";
+import { WaitlistHeroCTA } from "@/components/waitlist-hero-cta";
 import { getSubjects, type Subject } from "@/lib/api";
 
 /* ── Level config ──────────────────────────────────────────────────────────── */
@@ -126,6 +127,13 @@ export default function SubjectsPage() {
               Choose your exam board. Every subject below is powered by real past
               papers with examiner-style AI marking.
             </p>
+            <div className="mb-8">
+              <WaitlistHeroCTA
+                compact
+                buttonClassName="h-14 px-10 text-lg rounded-full w-full sm:w-auto"
+                formClassName="mt-5 rounded-3xl border border-border/60 bg-background p-5 text-left shadow-sm"
+              />
+            </div>
 
             {/* Board toggle */}
             <div className="inline-flex rounded-full border border-border bg-zinc-50 p-1 gap-1">
