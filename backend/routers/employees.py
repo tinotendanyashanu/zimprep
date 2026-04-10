@@ -140,24 +140,42 @@ def invite_employee(
     current: dict = Depends(require_admin),
 ):
     """
-    Create a new employee record. The invited person must sign up with the
-    same email address — their user_id will be linked on first login.
+    Invite a new employee.
+    1. Creates the employee record in the employee table.
+    2. Sends a Supabase invitation email via auth.admin.invite_user_by_email.
+       The invited person clicks the link, sets a password, and their
+       user_id is automatically linked on first /admin/employees/me call.
     """
     if payload.role not in ("admin", "employee"):
         raise HTTPException(status_code=422, detail="Invalid role")
 
     sb = get_supabase()
 
-    # Check for duplicate
+    # Check for duplicate employee record
     existing = (
         sb.table("employee").select("id").eq("email", payload.email).execute()
     )
     if existing.data:
         raise HTTPException(status_code=409, detail="Employee already exists")
 
+    # Send Supabase invitation email — this creates the auth.users record
+    # and emails a magic link so the person can set their password.
+    try:
+        invite_resp = sb.auth.admin.invite_user_by_email(
+            payload.email,
+            options={"data": {"name": payload.name, "employee_role": payload.role}},
+        )
+        auth_user_id = invite_resp.user.id if invite_resp.user else None
+    except Exception as exc:
+        logger.error("Supabase invite failed: %s", exc)
+        raise HTTPException(status_code=500, detail=f"Failed to send invitation email: {exc}")
+
+    # Create the employee record, linking user_id immediately since Supabase
+    # already created the auth user.
     employee_id = str(uuid.uuid4())
     new_emp = {
         "id": employee_id,
+        "user_id": auth_user_id,
         "email": payload.email,
         "name": payload.name,
         "role": payload.role,
@@ -166,7 +184,7 @@ def invite_employee(
     }
     resp = sb.table("employee").insert(new_emp).execute()
     if not resp.data:
-        raise HTTPException(status_code=500, detail="Failed to create employee")
+        raise HTTPException(status_code=500, detail="Failed to create employee record")
     return resp.data[0]
 
 

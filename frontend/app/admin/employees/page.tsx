@@ -305,7 +305,7 @@ export default function EmployeesPage() {
             <div>
               <h2 className="text-base font-semibold text-foreground">Invite employee</h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                They sign up with this email to activate their account.
+                They&apos;ll receive an email with a link to set their password and access the workstation.
               </p>
             </div>
             <form onSubmit={handleInvite} className="space-y-4">
