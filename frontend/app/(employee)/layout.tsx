@@ -82,8 +82,6 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         });
         if (!res.ok) { router.replace("/login"); return; }
         const emp: EmployeeProfile = await res.json();
-        // Admins go to full admin dashboard
-        if (emp.role === "admin") { router.replace("/admin"); return; }
         setEmployee(emp);
       } catch {
         router.replace("/login");
@@ -187,8 +185,14 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
           </div>
           {/* View switcher */}
           <div className="inline-flex items-center gap-1 border border-border rounded-lg bg-background p-0.5 text-xs">
-            <Link href="/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Student</Link>
+            {employee.role === "admin" && (
+              <Link href="/admin" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Admin</Link>
+            )}
             <span className="px-2.5 py-1 rounded-md bg-foreground text-background font-medium">Employee</span>
+            <Link href="/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Student</Link>
+            {employee.role === "admin" && (
+              <Link href="/parent/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Parent</Link>
+            )}
           </div>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium capitalize">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />

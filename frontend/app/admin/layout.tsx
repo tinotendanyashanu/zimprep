@@ -219,6 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <span className="px-2.5 py-1 rounded-md bg-foreground text-background font-medium">Admin</span>
             <Link href="/workstation" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Employee</Link>
             <Link href="/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Student</Link>
+            <Link href="/parent/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Parent</Link>
           </div>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium capitalize">
             <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
