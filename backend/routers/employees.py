@@ -256,8 +256,7 @@ def reset_employee_password(
         r = httpx.post(
             f"{supabase_url}/auth/v1/recover",
             headers={"apikey": supabase_key, "Content-Type": "application/json"},
-            json={"email": emp.data["email"]},
-            params={"redirect_to": redirect_to},
+            json={"email": emp.data["email"], "redirect_to": redirect_to},
             timeout=10,
         )
         if r.status_code not in (200, 204):
