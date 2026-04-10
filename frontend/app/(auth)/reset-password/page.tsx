@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
@@ -11,6 +11,27 @@ export default function ResetPasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(false);
+  const [ready, setReady] = useState(false); // session established from the link
+
+  useEffect(() => {
+    const supabase = createClient();
+
+    // Handle the token from the email link.
+    // Supabase embeds the session in the URL hash — listen for the
+    // PASSWORD_RECOVERY event which fires automatically when detected.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
+        setReady(true);
+      }
+    });
+
+    // Also check if we already have a valid session (e.g. page reload)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) setReady(true);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -46,9 +67,7 @@ export default function ResetPasswordPage() {
           <span className="text-2xl font-bold text-foreground">ZimPrep</span>
         </div>
         <h1 className="text-2xl font-semibold text-foreground">Set new password</h1>
-        <p className="text-muted-foreground text-sm mt-1">
-          Choose a strong password for your account.
-        </p>
+        <p className="text-muted-foreground text-sm mt-1">Choose a strong password for your account.</p>
       </div>
 
       {done ? (
@@ -61,12 +80,15 @@ export default function ResetPasswordPage() {
           <p className="text-sm font-medium text-foreground">Password updated</p>
           <p className="text-xs text-muted-foreground">Redirecting to login…</p>
         </div>
+      ) : !ready ? (
+        <div className="flex flex-col items-center gap-3 py-8 text-center">
+          <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-muted-foreground">Verifying your reset link…</p>
+        </div>
       ) : (
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              New password
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">New password</label>
             <input
               type="password"
               required
@@ -77,11 +99,8 @@ export default function ResetPasswordPage() {
               className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring transition"
             />
           </div>
-
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">
-              Confirm password
-            </label>
+            <label className="block text-sm font-medium text-foreground mb-1.5">Confirm password</label>
             <input
               type="password"
               required
@@ -91,13 +110,9 @@ export default function ResetPasswordPage() {
               className="w-full px-3.5 py-2.5 rounded-lg border border-border bg-background text-foreground placeholder:text-muted-foreground text-sm focus:outline-none focus:ring-2 focus:ring-ring transition"
             />
           </div>
-
           {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">
-              {error}
-            </p>
+            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-3.5 py-2.5">{error}</p>
           )}
-
           <button
             type="submit"
             disabled={loading}

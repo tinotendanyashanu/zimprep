@@ -5,6 +5,7 @@ All routes require the caller to be an authenticated admin employee.
 from __future__ import annotations
 
 import logging
+import os
 import uuid
 from typing import Optional
 
@@ -238,7 +239,6 @@ def reset_employee_password(
 ):
     """Send a password-reset email to the employee (admin only)."""
     import httpx
-    import os
 
     sb = get_supabase()
     emp = sb.table("employee").select("email, user_id").eq("id", employee_id).maybe_single().execute()
