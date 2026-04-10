@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from routers import admin, papers, sessions, attempts, students, parents, subscriptions, webhooks, waitlist
+from routers import admin, papers, sessions, attempts, students, parents, subscriptions, webhooks, waitlist, employees
 
 load_dotenv()
 
@@ -40,6 +40,7 @@ app.include_router(parents.router, prefix="/parents", tags=["parents"])
 app.include_router(subscriptions.router, tags=["subscriptions"])
 app.include_router(webhooks.router, tags=["webhooks"])
 app.include_router(waitlist.router, tags=["waitlist"])
+app.include_router(employees.router, prefix="/admin/employees", tags=["employees"])
 
 
 @app.get("/health", tags=["system"])

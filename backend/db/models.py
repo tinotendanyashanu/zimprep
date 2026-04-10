@@ -72,6 +72,17 @@ class Parent(BaseModel):
     created_at: datetime
 
 
+class Employee(BaseModel):
+    id: str
+    user_id: Optional[str] = None
+    email: str
+    name: str
+    role: str  # 'admin' | 'reviewer' | 'content'
+    is_active: bool = True
+    invited_by: Optional[str] = None
+    created_at: datetime
+
+
 class WaitlistEntry(BaseModel):
     id: str
     email: str
