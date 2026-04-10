@@ -17,8 +17,25 @@ import { ChevronLeft, Compass, Clock, Play, BookOpen, AlertCircle, CheckCircle2,
 
 import { GlassCard } from "@/components/ui/glass-card";
 import { Button } from "@/components/ui/button";
+import { Activity } from "lucide-react";
 
 const premiumCard = "glass-card";
+
+const LEVEL_LABELS: Record<string, string> = {
+  Grade7: "Grade 7",
+  O: "O Level",
+  A: "A Level",
+};
+
+const containerVars = {
+  hidden: { opacity: 0 },
+  show: { opacity: 1, transition: { staggerChildren: 0.05 } }
+} as const;
+
+const itemVars = {
+  hidden: { opacity: 0, y: 15 },
+  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
+} as const;
 
 export default function ExamSelectPage() {
   const router = useRouter();
