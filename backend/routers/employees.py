@@ -161,7 +161,7 @@ def invite_employee(
 
     # Send Supabase invitation email — this creates the auth.users record
     # and emails a magic link so the person can set their password.
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     redirect_to = f"{frontend_url}/auth/callback?next=/reset-password"
 
     try:
@@ -249,7 +249,7 @@ def reset_employee_password(
 
     supabase_url = os.environ["SUPABASE_URL"]
     supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
-    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     redirect_to = f"{frontend_url}/auth/callback?next=/reset-password"
 
     try:
