@@ -28,26 +28,17 @@ export default function LoginPage() {
 
     const user = authData.user;
     if (user) {
-      // Use the backend to check employee status (respects service-role auth)
-      const token = authData.session?.access_token;
       let destination = "/dashboard";
 
-      if (token) {
-        try {
-          const empRes = await fetch(
-            `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/admin/employees/me`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          if (empRes.ok) {
-            const emp = await empRes.json();
-            destination = emp.role === "admin" ? "/admin" : "/workstation";
-          }
-        } catch {
-          // not an employee — fall through to parent/student check
-        }
-      }
+      const { data: employee } = await supabase
+        .from("employee")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
 
-      if (destination === "/dashboard") {
+      if (employee) {
+        destination = employee.role === "admin" ? "/admin" : "/workstation";
+      } else {
         const { data: parent } = await supabase
           .from("parent")
           .select("id")
@@ -60,7 +51,6 @@ export default function LoginPage() {
     } else {
       router.push("/dashboard");
     }
-    router.refresh();
   }
 
   return (

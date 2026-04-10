@@ -209,20 +209,12 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
       if (!user) { router.push("/login"); return; }
 
       // Check if viewer is an employee/admin (for the "back" banner)
-      // Uses backend so RLS on employee table is not an issue
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        try {
-          const empRes = await fetch(
-            `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/admin/employees/me`,
-            { headers: { Authorization: `Bearer ${session.access_token}` } }
-          );
-          if (empRes.ok) {
-            const emp = await empRes.json();
-            setEmployeeRole(emp.role);
-          }
-        } catch { /* not an employee */ }
-      }
+      const { data: emp } = await supabase
+        .from("employee")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle();
+      if (emp) setEmployeeRole(emp.role);
 
       const { data: student } = await supabase
         .from("student")
