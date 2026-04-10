@@ -52,6 +52,8 @@ export default function EmployeesPage() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   // Search
   const [search, setSearch] = useState("");
@@ -85,6 +87,7 @@ export default function EmployeesPage() {
     setEditRole(emp.role);
     setSaveError("");
     setConfirmDelete(false);
+    setResetSent(false);
   }
 
   function closeDrawer() {
@@ -158,6 +161,20 @@ export default function EmployeesPage() {
       const updated: Employee = await res.json();
       setEmployees((prev) => prev.map((e) => (e.id === updated.id ? updated : e)));
       setSelected(updated);
+    }
+  }
+
+  async function handleResetPassword() {
+    if (!token || !selected) return;
+    setResetting(true);
+    try {
+      await fetch(`${BACKEND}/admin/employees/${selected.id}/reset-password`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      setResetSent(true);
+    } finally {
+      setResetting(false);
     }
   }
 
@@ -456,6 +473,29 @@ export default function EmployeesPage() {
                 <div className="space-y-3 pt-2">
                   <p className="text-xs font-semibold text-foreground uppercase tracking-wide">Actions</p>
                   <div className="border border-border rounded-xl divide-y divide-border">
+                    {/* Password reset */}
+                    <div className="flex items-center justify-between px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Send password reset</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {selected.user_id
+                            ? "Emails a reset link to their inbox"
+                            : "Not available — employee hasn't signed up yet"}
+                        </p>
+                      </div>
+                      {resetSent ? (
+                        <span className="text-xs text-emerald-600 font-medium">Sent</span>
+                      ) : (
+                        <button
+                          onClick={handleResetPassword}
+                          disabled={resetting || !selected.user_id}
+                          className="px-3 py-1.5 rounded-lg text-xs font-medium bg-muted text-foreground hover:bg-muted/80 border border-border transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {resetting ? "Sending…" : "Send reset"}
+                        </button>
+                      )}
+                    </div>
+
                     {/* Toggle active */}
                     <div className="flex items-center justify-between px-4 py-3">
                       <div>

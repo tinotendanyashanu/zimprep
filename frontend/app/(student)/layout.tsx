@@ -201,11 +201,29 @@ function StudentShell({ children, studentName }: { children: React.ReactNode; st
 export default function StudentLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const [profile, setProfile] = useState<StudentProfile | null>(null);
+  const [employeeRole, setEmployeeRole] = useState<string | null>(null);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(async ({ data: { user } }) => {
       if (!user) { router.push("/login"); return; }
+
+      // Check if viewer is an employee/admin (for the "back" banner)
+      // Uses backend so RLS on employee table is not an issue
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        try {
+          const empRes = await fetch(
+            `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/admin/employees/me`,
+            { headers: { Authorization: `Bearer ${session.access_token}` } }
+          );
+          if (empRes.ok) {
+            const emp = await empRes.json();
+            setEmployeeRole(emp.role);
+          }
+        } catch { /* not an employee */ }
+      }
+
       const { data: student } = await supabase
         .from("student")
         .select("name, exam_board, level")
@@ -223,7 +241,21 @@ export default function StudentLayout({ children }: { children: React.ReactNode 
   if (profile === null) return null;
   return (
     <StudentContext.Provider value={profile}>
-      <StudentShell studentName={profile.name}>{children}</StudentShell>
+      {/* Banner shown when an admin/employee is previewing the student view */}
+      {employeeRole && (
+        <div className="fixed top-0 inset-x-0 z-50 flex items-center justify-between px-4 py-2 bg-foreground text-background text-xs font-medium">
+          <span>Viewing as student — <span className="opacity-60">preview mode</span></span>
+          <Link
+            href={employeeRole === "admin" ? "/admin" : "/workstation"}
+            className="underline hover:no-underline"
+          >
+            Back to {employeeRole === "admin" ? "Admin" : "Workstation"}
+          </Link>
+        </div>
+      )}
+      <div className={employeeRole ? "pt-9" : ""}>
+        <StudentShell studentName={profile.name}>{children}</StudentShell>
+      </div>
     </StudentContext.Provider>
   );
 }

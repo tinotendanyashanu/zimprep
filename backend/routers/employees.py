@@ -225,6 +225,43 @@ def deactivate_employee(
     sb.table("employee").update({"is_active": False}).eq("id", employee_id).execute()
 
 
+@router.post("/{employee_id}/reset-password", status_code=200)
+def reset_employee_password(
+    employee_id: str,
+    _current: dict = Depends(require_admin),
+):
+    """Send a password-reset email to the employee (admin only)."""
+    import httpx
+    import os
+
+    sb = get_supabase()
+    emp = sb.table("employee").select("email, user_id").eq("id", employee_id).maybe_single().execute()
+    if not emp.data:
+        raise HTTPException(status_code=404, detail="Employee not found")
+    if not emp.data.get("user_id"):
+        raise HTTPException(status_code=400, detail="Employee has not signed up yet — resend the invite instead")
+
+    supabase_url = os.environ["SUPABASE_URL"]
+    supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+
+    try:
+        r = httpx.post(
+            f"{supabase_url}/auth/v1/recover",
+            headers={"apikey": supabase_key, "Content-Type": "application/json"},
+            json={"email": emp.data["email"]},
+            timeout=10,
+        )
+        if r.status_code not in (200, 204):
+            raise HTTPException(status_code=500, detail="Failed to send reset email")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Password reset failed: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"sent": True, "email": emp.data["email"]}
+
+
 @router.delete("/{employee_id}/permanent", status_code=204)
 def delete_employee_permanently(
     employee_id: str,

@@ -178,19 +178,22 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
 
       {/* Main */}
       <div className="flex-1 ml-56 min-h-screen flex flex-col">
-        <header className="h-14 border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30 flex items-center px-6">
+        <header className="h-14 border-b border-border bg-card/80 backdrop-blur-sm sticky top-0 z-30 flex items-center px-6 gap-4">
           <div className="flex-1 flex items-center gap-3">
             <div className="h-5 w-px bg-border" />
             <span className="text-sm text-muted-foreground">
               {nav.find((n) => isActive(n.href))?.label ?? "Workstation"}
             </span>
           </div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium capitalize">
-              <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
-              {employee.role}
-            </span>
+          {/* View switcher */}
+          <div className="inline-flex items-center gap-1 border border-border rounded-lg bg-background p-0.5 text-xs">
+            <Link href="/dashboard" className="px-2.5 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted/60 transition font-medium">Student</Link>
+            <span className="px-2.5 py-1 rounded-md bg-foreground text-background font-medium">Employee</span>
           </div>
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium capitalize">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+            {employee.role}
+          </span>
         </header>
         <main className="flex-1 p-6">{children}</main>
       </div>
