@@ -33,7 +33,7 @@ export default function LoginPage() {
       const { data: employee } = await supabase
         .from("employee")
         .select("role")
-        .eq("user_id", user.id)
+        .or(`user_id.eq.${user.id},email.eq.${user.email}`)
         .maybeSingle();
 
       if (employee) {
