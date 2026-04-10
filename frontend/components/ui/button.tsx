@@ -2,32 +2,31 @@ import * as React from "react"
 import { Slot } from "@radix-ui/react-slot"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Loader2 } from "lucide-react"
+import { motion, HTMLMotionProps } from "framer-motion"
 
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-all duration-200 ease-in-out active:scale-[0.97] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/95 shadow-sm",
+        default: "bg-primary text-primary-foreground hover:bg-primary/90 shadow-[0_2px_10px_-3px_rgba(0,135,95,0.4)]",
         destructive:
-          "bg-destructive text-white hover:bg-destructive/90 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/60",
+          "bg-destructive text-destructive-foreground shadow-sm hover:bg-destructive/90",
         outline:
-          "border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50",
+          "border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground",
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-secondary/80",
-        ghost:
-          "hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50",
+          "bg-secondary text-secondary-foreground shadow-sm hover:bg-secondary/80",
+        ghost: "hover:bg-accent hover:text-accent-foreground",
         link: "text-primary underline-offset-4 hover:underline",
+        glass: "bg-white/20 dark:bg-black/20 backdrop-blur-md border border-white/30 dark:border-white/10 text-foreground hover:bg-white/30 dark:hover:bg-black/30 shadow-sm",
       },
       size: {
-        default: "h-[44px] px-6 py-2 has-[>svg]:px-4", // Target safe area 44px
-        sm: "h-9 gap-1.5 px-4 has-[>svg]:px-3",
-        lg: "h-12 px-8 has-[>svg]:px-5 text-base",
-        icon: "size-[44px]",
-        "icon-sm": "size-9",
-        "icon-lg": "size-12",
+        default: "h-11 px-6 py-2",
+        sm: "h-9 rounded-full px-4 text-xs",
+        lg: "h-14 rounded-full px-10 text-base font-semibold",
+        icon: "h-11 w-11",
       },
     },
     defaultVariants: {
@@ -38,7 +37,8 @@ const buttonVariants = cva(
 )
 
 export interface ButtonProps
-  extends React.ButtonHTMLAttributes<HTMLButtonElement>,
+  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, keyof HTMLMotionProps<"button">>,
+    HTMLMotionProps<"button">,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean
   isLoading?: boolean
@@ -46,21 +46,30 @@ export interface ButtonProps
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, isLoading, children, disabled, ...props }, ref) => {
-    const Comp = asChild ? Slot : "button"
+    if (asChild) {
+      return (
+        <Slot
+          className={cn(buttonVariants({ variant, size, className }))}
+          ref={ref as any}
+          {...props}
+        >
+          {children}
+        </Slot>
+      )
+    }
+
     return (
-      <Comp
+      <motion.button
+        whileTap={{ scale: 0.96 }}
+        transition={{ type: "spring", stiffness: 400, damping: 25 }}
         className={cn(buttonVariants({ variant, size, className }))}
         disabled={isLoading || disabled}
         ref={ref}
         {...props}
       >
-        {asChild ? children : (
-          <>
-            {isLoading && <Loader2 className="animate-spin" />}
-            {children}
-          </>
-        )}
-      </Comp>
+        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+        {children}
+      </motion.button>
     )
   }
 )

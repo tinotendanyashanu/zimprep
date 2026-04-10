@@ -122,6 +122,26 @@
     @apply bg-card rounded-3xl p-6 md:p-8 overflow-hidden shadow-sm border border-black/5;
   }
 
+  .glass {
+    @apply bg-white/70 dark:bg-black/70 backdrop-blur-xl border border-white/20 dark:border-white/10 shadow-lg;
+  }
+
+  .glass-card {
+    @apply bg-white/40 dark:bg-black/40 backdrop-blur-md border border-white/30 dark:border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] rounded-3xl transition-all duration-300 hover:bg-white/50 dark:hover:bg-black/50 hover:shadow-[0_8px_32px_0_rgba(31,38,135,0.15)];
+  }
+
+  .glass-morphism {
+    background: rgba(255, 255, 255, 0.4);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+  }
+
+  .dark .glass-morphism {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
   /* Typography utilities for "Calm" feel */
   .text-calm-h1 {
     @apply text-5xl md:text-7xl font-semibold tracking-tight leading-[1.05];

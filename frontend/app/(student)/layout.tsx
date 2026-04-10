@@ -98,63 +98,84 @@ function StudentShell({ children, studentName }: { children: React.ReactNode; st
   return (
     <div className="min-h-screen bg-background flex flex-col">
       {/* ── Top bar (desktop + mobile header) ─────────────────────────── */}
-      <header className="sticky top-0 z-40 border-b border-border bg-background/95 backdrop-blur-md">
-        <div className="mx-auto max-w-5xl px-4 h-14 flex items-center justify-between">
+      <header className="sticky top-0 z-40 border-b border-white/20 bg-background/70 backdrop-blur-xl">
+        <div className="mx-auto max-w-5xl px-6 h-16 flex items-center justify-between">
           {/* Logo */}
-          <Link href="/dashboard" className="font-bold text-lg tracking-tight text-foreground">
-            Zim<span className="text-primary">Prep</span>
+          <Link href="/dashboard" className="font-bold text-xl tracking-tight text-foreground flex items-center gap-2 group">
+            <div className="w-8 h-8 rounded-xl bg-primary flex items-center justify-center shadow-lg shadow-primary/20 group-hover:scale-105 transition-transform duration-300">
+              <span className="text-white text-xs">ZP</span>
+            </div>
+            <span>Zim<span className="text-primary">Prep</span></span>
           </Link>
 
           {/* Desktop nav */}
-          <nav className="hidden sm:flex items-center gap-1">
+          <nav className="hidden sm:flex items-center gap-2 bg-white/40 dark:bg-black/20 p-1.5 rounded-2xl border border-white/30 dark:border-white/5 shadow-sm">
             {NAV.map(({ href, label, Icon }) => {
               const active = isActive(pathname, href);
               return (
                 <Link
                   key={href}
                   href={href}
-                  className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  className={`relative flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-300 ${
                     active
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                      ? "text-primary"
+                      : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  <span className={`[&_svg]:w-4 [&_svg]:h-4 ${active ? "text-primary" : ""}`}>
+                  {active && (
+                    <motion.div
+                      layoutId="nav-pill"
+                      className="absolute inset-0 bg-white dark:bg-white/10 rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.04)]"
+                      transition={{ type: "spring", stiffness: 350, damping: 30 }}
+                    />
+                  )}
+                  <span className="relative z-10 [&_svg]:w-4.5 [&_svg]:h-4.5">
                     <Icon filled={active} />
                   </span>
-                  {label}
+                  <span className="relative z-10">{label}</span>
                 </Link>
               );
             })}
           </nav>
 
           {/* Desktop right */}
-          <div className="hidden sm:flex items-center gap-3">
-            <span className="text-xs text-muted-foreground max-w-[160px] truncate">{studentName}</span>
+          <div className="hidden sm:flex items-center gap-4">
+            <div className="flex flex-col items-end">
+              <span className="text-sm font-semibold text-foreground truncate max-w-[160px]">{studentName}</span>
+              <span className="text-[10px] text-muted-foreground uppercase tracking-widest font-bold">Student</span>
+            </div>
             <button
               onClick={handleSignOut}
-              className="text-xs text-muted-foreground hover:text-foreground px-2.5 py-1.5 rounded-lg hover:bg-muted transition-colors"
+              className="p-2 rounded-xl bg-muted/50 hover:bg-muted text-muted-foreground hover:text-foreground transition-all duration-200"
+              title="Sign out"
             >
-              Sign out
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="w-5 h-5">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15M12 9l-3 3m0 0l3 3m-3-3h12.75" />
+              </svg>
             </button>
           </div>
 
           {/* Mobile: greeting */}
-          <p className="sm:hidden text-sm font-medium text-foreground truncate max-w-[160px]">
-            {studentName.split(" ")[0]}
-          </p>
+          <div className="sm:hidden flex items-center gap-3">
+            <p className="text-sm font-bold text-foreground">
+              {studentName.split(" ")[0]}
+            </p>
+            <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center border border-primary/20">
+              <span className="text-[10px] font-bold text-primary">{studentName[0]}</span>
+            </div>
+          </div>
         </div>
       </header>
 
       {/* ── Page content ─────────────────────────────────────────────────── */}
-      <main className="flex-1 pb-20 sm:pb-0 relative">
+      <main className="flex-1 pb-24 sm:pb-0 relative">
         <AnimatePresence mode="wait">
           <motion.div
             key={pathname}
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.98 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            initial={{ opacity: 0, scale: 0.98, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 1.02, y: -10 }}
+            transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
             className="h-full"
           >
             {children}
@@ -163,28 +184,28 @@ function StudentShell({ children, studentName }: { children: React.ReactNode; st
       </main>
 
       {/* ── Bottom tab bar (mobile only) ──────────────────────────────────── */}
-      <nav className="sm:hidden fixed bottom-0 inset-x-0 z-40 bg-background/80 backdrop-blur-xl border-t border-black/5 dark:border-white/10">
-        <div className="flex items-stretch h-16 safe-area-inset-bottom">
+      <nav className="sm:hidden fixed bottom-6 inset-x-6 z-40 bg-white/60 dark:bg-black/60 backdrop-blur-2xl border border-white/30 dark:border-white/10 rounded-[32px] shadow-[0_12px_40px_rgba(0,0,0,0.12)]">
+        <div className="flex items-stretch h-18 safe-area-inset-bottom">
           {NAV.map(({ href, label, Icon }) => {
             const active = isActive(pathname, href);
             return (
               <Link
                 key={href}
                 href={href}
-                className={`flex-1 flex flex-col items-center justify-center gap-0.5 pt-2 pb-3 transition-colors ${
-                  active ? "text-primary" : "text-muted-foreground"
+                className={`flex-1 flex flex-col items-center justify-center gap-1 transition-all duration-300 ${
+                  active ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <span className="relative">
+                <div className="relative p-1">
                   <Icon filled={active} />
                   {active && (
                     <motion.span 
-                      layoutId="bottom-nav-indicator"
-                      className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-primary" 
+                      layoutId="bottom-nav-active-glow"
+                      className="absolute inset-0 bg-primary/20 blur-xl rounded-full"
                     />
                   )}
-                </span>
-                <span className={`text-[10px] font-medium ${active ? "text-primary" : ""}`}>
+                </div>
+                <span className={`text-[11px] font-bold tracking-tight ${active ? "text-primary" : ""}`}>
                   {label}
                 </span>
               </Link>

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
+
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -27,18 +29,21 @@ export default function LoginPage() {
     }
 
     const user = authData.user;
-    if (!user) { router.push("/dashboard"); return; }
+    const session = authData.session;
+    if (!user || !session) { router.push("/dashboard"); return; }
 
-    // 1. Check employee table first (admin / employee roles)
-    const { data: employee } = await supabase
-      .from("employee")
-      .select("role, is_active")
-      .or(`user_id.eq.${user.id},email.eq.${user.email}`)
-      .maybeSingle();
-
-    if (employee?.is_active) {
-      router.push(employee.role === "admin" ? "/admin" : "/workstation");
-      return;
+    // 1. Check employee/admin status via backend (uses service role — bypasses RLS)
+    try {
+      const res = await fetch(`${BACKEND}/admin/employees/me`, {
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (res.ok) {
+        const emp = await res.json();
+        router.push(emp.role === "admin" ? "/admin" : "/workstation");
+        return;
+      }
+    } catch {
+      // backend unreachable — fall through to table checks
     }
 
     // 2. Check parent table

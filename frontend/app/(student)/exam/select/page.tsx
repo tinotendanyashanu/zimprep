@@ -15,23 +15,10 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { ChevronLeft, Compass, Clock, Play, BookOpen, AlertCircle, CheckCircle2, ArrowRight } from "lucide-react";
 
-const premiumCard = "bg-white rounded-[2rem] ring-1 ring-black/[0.04] shadow-[0_8px_30px_rgba(0,0,0,0.04)]";
+import { GlassCard } from "@/components/ui/glass-card";
+import { Button } from "@/components/ui/button";
 
-const LEVEL_LABELS: Record<string, string> = {
-  Grade7: "Grade 7",
-  O: "O Level",
-  A: "A Level",
-};
-
-const containerVars = {
-  hidden: { opacity: 0 },
-  show: { opacity: 1, transition: { staggerChildren: 0.05 } }
-} as const;
-
-const itemVars = {
-  hidden: { opacity: 0, y: 15 },
-  show: { opacity: 1, y: 0, transition: { type: "spring", stiffness: 300, damping: 24 } }
-} as const;
+const premiumCard = "glass-card";
 
 export default function ExamSelectPage() {
   const router = useRouter();
@@ -91,14 +78,10 @@ export default function ExamSelectPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-6 py-12 flex justify-center">
-        <div className="max-w-3xl w-full animate-pulse space-y-4">
-          <div className="h-20 rounded-3xl bg-gray-200/50" />
-          <div className="grid sm:grid-cols-2 gap-4">
-            {[1, 2, 3, 4].map((i) => (
-              <div key={i} className="h-32 rounded-3xl bg-gray-200/50" />
-            ))}
-          </div>
+      <div className="min-h-screen bg-background px-6 py-12 flex justify-center items-center">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin" />
+          <p className="text-sm font-medium text-muted-foreground animate-pulse">Loading subjects...</p>
         </div>
       </div>
     );
@@ -106,65 +89,69 @@ export default function ExamSelectPage() {
 
   if (error && step === 1) {
     return (
-      <div className="min-h-screen bg-[#F8F9FA] px-6 py-12 flex justify-center">
-        <div className="max-w-xl w-full">
-          <div className={cn(premiumCard, "p-10 text-center flex flex-col items-center")}>
-             <AlertCircle className="w-12 h-12 text-red-500 mb-4" />
-             <h2 className="text-xl font-black text-gray-900 mb-2">Failed to Load</h2>
-             <p className="text-gray-500 font-medium mb-6">{error}</p>
-             <button
-               onClick={() => {
-                 setError(null);
-                 setLoading(true);
-                 getSubjects(examBoard || undefined, level || undefined)
-                   .then(setSubjects).catch((e) => setError(e.message)).finally(() => setLoading(false));
-               }}
-               className="bg-black text-white px-6 py-3 rounded-xl font-bold active:scale-95 transition-all"
-             >
-               Try Again
-             </button>
-          </div>
-        </div>
+      <div className="min-h-screen bg-background px-6 py-12 flex justify-center items-center">
+        <GlassCard className="max-w-md w-full p-10 text-center flex flex-col items-center border-red-500/20 bg-red-500/5">
+           <AlertCircle className="w-16 h-16 text-red-500 mb-6" />
+           <h2 className="text-2xl font-bold text-foreground mb-2">Sync Failed</h2>
+           <p className="text-muted-foreground font-medium mb-8 leading-relaxed">{error}</p>
+           <Button
+             onClick={() => {
+               setError(null);
+               setLoading(true);
+               getSubjects(examBoard || undefined, level || undefined)
+                 .then(setSubjects).catch((e) => setError(e.message)).finally(() => setLoading(false));
+             }}
+             className="w-full"
+           >
+             Try Again
+           </Button>
+        </GlassCard>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] px-6 py-10 lg:py-16 selection:bg-purple-100">
-      <div className="max-w-3xl mx-auto space-y-8">
+    <div className="min-h-screen bg-background px-6 py-10 lg:py-16 font-sans">
+      <div className="max-w-4xl mx-auto space-y-12">
         
         {/* Step Indicator Pill */}
-        <div className="flex justify-center mb-8">
-           <div className="bg-white p-1 rounded-full ring-1 ring-black/5 shadow-sm inline-flex items-center gap-1">
-             {(["Subject", "Paper", "Confirm"] as const).map((label, i) => (
-               <div
-                 key={label}
-                 className={cn(
-                   "px-4 py-2 rounded-full text-xs font-black uppercase tracking-widest transition-all",
-                   step === i + 1
-                     ? "bg-indigo-500 text-white shadow-md shadow-indigo-500/20"
-                     : step > i + 1 
-                       ? "text-indigo-600 bg-indigo-50"
-                       : "text-gray-400"
-                 )}
-               >
-                 <span className="hidden sm:inline">{label}</span>
-                 <span className="sm:hidden">{i+1}</span>
-               </div>
-             ))}
+        <div className="flex justify-center">
+           <div className="glass p-1.5 rounded-full inline-flex items-center gap-1 shadow-2xl shadow-black/5 border-white/20 dark:border-white/5">
+             {(["Subject", "Paper", "Confirm"] as const).map((label, i) => {
+               const isActive = step === i + 1;
+               const isCompleted = step > i + 1;
+               return (
+                 <div
+                   key={label}
+                   className={cn(
+                     "px-6 py-2.5 rounded-full text-[11px] font-bold uppercase tracking-[0.2em] transition-all duration-500 flex items-center gap-2",
+                     isActive
+                       ? "bg-primary text-white shadow-lg shadow-primary/20 scale-105"
+                       : isCompleted
+                         ? "text-primary bg-primary/10"
+                         : "text-muted-foreground opacity-50"
+                   )}
+                 >
+                   <span className="w-5 h-5 rounded-full bg-white/20 flex items-center justify-center text-[10px]">
+                     {isCompleted ? <CheckCircle2 className="w-3 h-3" /> : i + 1}
+                   </span>
+                   <span className="hidden sm:inline">{label}</span>
+                 </div>
+               );
+             })}
            </div>
         </div>
 
         {/* Step 1 — Subject selection */}
         {step === 1 && (
-          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-8">
-            <motion.div variants={itemVars} className="text-center sm:text-left flex flex-col sm:flex-row items-center gap-6">
-              <div className="w-16 h-16 bg-indigo-100 rounded-[1.5rem] flex items-center justify-center text-indigo-600 shrink-0 shadow-inner">
-                 <Compass className="w-8 h-8" />
+          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-10">
+            <motion.div variants={itemVars} className="text-center sm:text-left flex flex-col sm:flex-row items-center gap-8">
+              <div className="w-20 h-20 bg-primary/10 rounded-[2rem] flex items-center justify-center text-primary shrink-0 shadow-xl shadow-primary/5 group transition-transform hover:scale-105">
+                 <Compass className="w-10 h-10" />
               </div>
-              <div>
-                <h1 className="text-3xl font-black text-gray-900 tracking-tight">Choose Subject</h1>
-                <p className="text-gray-500 font-medium text-lg mt-1">Select the discipline you want to test on.</p>
+              <div className="space-y-2">
+                <h1 className="text-4xl font-bold text-foreground tracking-tight">Choose Subject</h1>
+                <p className="text-muted-foreground font-medium text-lg leading-relaxed">Select the discipline you want to master today.</p>
               </div>
             </motion.div>
 
@@ -176,25 +163,36 @@ export default function ExamSelectPage() {
                 />
               </motion.div>
             ) : (
-              <motion.div variants={itemVars} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <motion.div variants={itemVars} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {subjects.map((s) => (
                   <button
                     key={s.id}
                     onClick={() => handleSelectSubject(s)}
                     disabled={papersLoading}
-                    className={cn(premiumCard, "text-left p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 group hover:scale-[1.02] active:scale-[0.98] transition-all hover:ring-indigo-500/20 outline-none")}
+                    className="group outline-none"
                   >
-                    <div className="flex-1">
-                      <p className="font-extrabold text-lg text-gray-900 group-hover:text-indigo-600 transition-colors leading-tight">
-                        {s.name}
-                      </p>
-                      <p className="text-sm font-semibold text-gray-400 mt-1">
-                        {s.paper_count} paper{s.paper_count !== 1 ? "s" : ""} available
-                      </p>
-                    </div>
-                    <span className="text-[10px] font-black uppercase tracking-widest bg-gray-100 text-gray-500 px-3 py-1.5 rounded-xl shrink-0 group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
-                      {LEVEL_LABELS[s.level] ?? s.level}
-                    </span>
+                    <GlassCard className="text-left p-8 flex flex-col justify-between h-full group-hover:bg-primary/5 group-hover:border-primary/20 transition-all duration-500 relative overflow-hidden group-active:scale-95">
+                      <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                        <BookOpen className="w-20 h-20 -rotate-12" />
+                      </div>
+                      <div className="space-y-4 relative z-10">
+                        <span className="text-[10px] font-bold uppercase tracking-[0.2em] bg-primary/10 text-primary px-3 py-1.5 rounded-full">
+                          {LEVEL_LABELS[s.level] ?? s.level}
+                        </span>
+                        <h3 className="font-bold text-2xl text-foreground group-hover:text-primary transition-colors leading-tight pt-2">
+                          {s.name}
+                        </h3>
+                        <p className="text-sm font-bold text-muted-foreground uppercase tracking-widest flex items-center gap-2">
+                          <Activity className="w-3 h-3" />
+                          {s.paper_count} Paper{s.paper_count !== 1 ? "s" : ""}
+                        </p>
+                      </div>
+                      <div className="mt-8 flex justify-end">
+                        <div className="w-10 h-10 rounded-full border border-muted/20 flex items-center justify-center group-hover:bg-primary group-hover:text-white group-hover:border-primary transition-all duration-500">
+                          <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                        </div>
+                      </div>
+                    </GlassCard>
                   </button>
                 ))}
               </motion.div>
@@ -204,35 +202,35 @@ export default function ExamSelectPage() {
 
         {/* Step 2 — Paper selection */}
         {step === 2 && selectedSubject && (
-          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-8">
-            <motion.div variants={itemVars} className="flex items-center gap-4">
+          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-10">
+            <motion.div variants={itemVars} className="flex flex-col sm:flex-row items-center gap-8">
               <button
                 onClick={() => setStep(1)}
-                className="w-12 h-12 rounded-full bg-white ring-1 ring-black/5 shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all active:scale-95"
+                className="w-16 h-16 rounded-[1.5rem] bg-white dark:bg-black/40 border border-muted/10 shadow-xl flex items-center justify-center text-muted-foreground hover:text-primary hover:bg-primary/5 transition-all active:scale-90"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ChevronLeft className="w-8 h-8" />
               </button>
-              <div>
-                <h1 className="text-3xl font-black text-gray-900 tracking-tight">{selectedSubject.name}</h1>
-                <p className="text-gray-500 font-medium text-lg mt-1">Select a specific paper variant</p>
+              <div className="text-center sm:text-left space-y-2">
+                <h1 className="text-4xl font-bold text-foreground tracking-tight">{selectedSubject.name}</h1>
+                <p className="text-muted-foreground font-medium text-lg">Select a specific year and session to begin.</p>
               </div>
             </motion.div>
 
             {papersLoading ? (
-              <motion.div variants={itemVars} className="animate-pulse space-y-3">
+              <motion.div variants={itemVars} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-20 rounded-[1.5rem] bg-gray-200/50" />
+                  <div key={i} className="h-48 rounded-[2rem] bg-muted/10 animate-pulse" />
                 ))}
               </motion.div>
             ) : papers.length === 0 ? (
               <motion.div variants={itemVars}>
                 <EmptyState
-                  title="No discrete papers available"
+                  title="No papers available"
                   description="Try a different subject."
                 />
               </motion.div>
             ) : (
-              <motion.div variants={itemVars} className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <motion.div variants={itemVars} className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
                 {papers.map((p) => (
                   <button
                     key={p.id}
@@ -240,20 +238,26 @@ export default function ExamSelectPage() {
                       setSelectedPaper(p);
                       setStep(3);
                     }}
-                    className={cn(premiumCard, "p-6 flex flex-col text-left group hover:scale-[1.02] active:scale-[0.98] transition-all hover:ring-indigo-500/20 outline-none")}
+                    className="group outline-none"
                   >
-                     <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-                        <BookOpen className="w-6 h-6" />
-                     </div>
-                     <p className="font-extrabold text-xl text-gray-900 group-hover:text-indigo-600 transition-colors">
-                        {p.year} {p.exam_session && <span className="capitalize text-gray-500 font-semibold group-hover:text-indigo-400">({p.exam_session})</span>}
-                     </p>
-                     <p className="font-semibold text-gray-500 mt-1 mb-4 flex-1">
-                        Paper {p.paper_number}
-                     </p>
-                     <div className="flex justify-end">
-                       <ArrowRight className="w-5 h-5 text-gray-300 group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" />
-                     </div>
+                    <GlassCard className="p-8 flex flex-col text-left h-full group-hover:bg-indigo-500/5 group-hover:border-indigo-500/20 transition-all duration-500 group-active:scale-95">
+                       <div className="w-14 h-14 bg-indigo-500/10 text-indigo-500 rounded-2xl flex items-center justify-center mb-8 group-hover:bg-indigo-500 group-hover:text-white transition-all duration-500 shadow-xl shadow-indigo-500/10">
+                          <BookOpen className="w-7 h-7" />
+                       </div>
+                       <div className="space-y-2 flex-1">
+                         <h3 className="font-bold text-2xl text-foreground group-hover:text-indigo-600 transition-colors">
+                            {p.year}
+                         </h3>
+                         <p className="font-bold text-muted-foreground uppercase tracking-widest text-xs">
+                           Paper {p.paper_number}
+                           {p.exam_session && <span className="ml-2 opacity-60">• {p.exam_session}</span>}
+                         </p>
+                       </div>
+                       <div className="mt-8 flex justify-between items-center">
+                         <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity">Select Paper</span>
+                         <ArrowRight className="w-5 h-5 text-muted-foreground group-hover:text-indigo-600 group-hover:translate-x-1 transition-all" />
+                       </div>
+                    </GlassCard>
                   </button>
                 ))}
               </motion.div>
@@ -263,89 +267,106 @@ export default function ExamSelectPage() {
 
         {/* Step 3 — Confirm */}
         {step === 3 && selectedSubject && selectedPaper && (
-          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-8">
-            <motion.div variants={itemVars} className="flex items-center gap-4">
+          <motion.div variants={containerVars} initial="hidden" animate="show" className="space-y-10 max-w-2xl mx-auto">
+            <motion.div variants={itemVars} className="flex items-center gap-6">
               <button
                 onClick={() => setStep(2)}
-                className="w-12 h-12 rounded-full bg-white ring-1 ring-black/5 shadow-sm flex items-center justify-center text-gray-600 hover:bg-gray-50 hover:text-gray-900 transition-all active:scale-95"
+                className="w-14 h-14 rounded-2xl bg-white dark:bg-black/40 border border-muted/10 shadow-xl flex items-center justify-center text-muted-foreground hover:text-indigo-500 hover:bg-indigo-500/5 transition-all active:scale-90"
               >
-                <ChevronLeft className="w-6 h-6" />
+                <ChevronLeft className="w-7 h-7" />
               </button>
-              <div>
-                <h1 className="text-3xl font-black text-gray-900 tracking-tight">Mission Brief</h1>
-                <p className="text-gray-500 font-medium text-lg mt-1">Configure your run parameters</p>
+              <div className="space-y-1">
+                <h1 className="text-3xl font-bold text-foreground tracking-tight">Mission Brief</h1>
+                <p className="text-muted-foreground font-medium text-base">Configure your run parameters</p>
               </div>
             </motion.div>
 
-            <motion.div variants={itemVars} className={cn(premiumCard, "p-8 sm:p-10 bg-linear-to-br from-white to-indigo-50/50")}>
-              <div className="flex flex-col md:flex-row gap-8 items-start md:items-center">
-                 <div className="flex-1 space-y-2">
-                    <p className="text-[10px] font-black uppercase tracking-widest text-indigo-500 bg-indigo-50 px-3 py-1.5 rounded-xl w-fit">Target Logged</p>
-                    <p className="text-2xl font-black text-gray-900">{selectedSubject.name}</p>
-                    <p className="text-lg font-bold text-gray-500">
-                      {selectedPaper.year}
-                      {selectedPaper.exam_session && <span className="capitalize"> ({selectedPaper.exam_session})</span>}
-                      {" — "}Paper {selectedPaper.paper_number}
-                    </p>
+            <GlassCard className="p-10 md:p-12 overflow-hidden relative shadow-2xl shadow-indigo-500/10 border-indigo-500/20">
+              {/* Background accent */}
+              <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/5 blur-[80px] -z-10 rounded-full" />
+              
+              <div className="flex flex-col gap-8">
+                 <div className="space-y-4">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-500 bg-indigo-500/10 px-4 py-1.5 rounded-full border border-indigo-500/10">Target Logged</span>
+                    <div>
+                      <h2 className="text-4xl font-bold text-foreground">{selectedSubject.name}</h2>
+                      <p className="text-xl font-medium text-muted-foreground mt-2">
+                        {selectedPaper.year}
+                        {selectedPaper.exam_session && <span className="capitalize"> {selectedPaper.exam_session} Session</span>}
+                        {" • "}Paper {selectedPaper.paper_number}
+                      </p>
+                    </div>
+                 </div>
+
+                 <div className="h-px bg-muted/10 w-full" />
+
+                 <div className="space-y-6">
+                    <p className="text-xs font-bold uppercase tracking-[0.25em] text-muted-foreground opacity-60">Select Run Mode</p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                      {(["exam", "practice"] as const).map((m) => {
+                        const isExam = m === "exam";
+                        const active = mode === m;
+                        return (
+                          <button
+                            key={m}
+                            onClick={() => setMode(m)}
+                            className={cn(
+                              "rounded-[2rem] p-8 text-left transition-all duration-500 border-2 outline-none group relative overflow-hidden",
+                              active
+                                ? "border-indigo-500 bg-indigo-500/5 shadow-xl shadow-indigo-500/10 scale-[1.05]"
+                                : "border-muted/10 bg-muted/5 hover:border-indigo-500/30 hover:bg-indigo-500/[0.02]"
+                            )}
+                          >
+                            <div className="flex items-center justify-between mb-6">
+                               <div className={cn("w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg transition-transform duration-500 group-hover:scale-110", isExam ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-500")}>
+                                 {isExam ? <Clock className="w-6 h-6" /> : <CheckCircle2 className="w-6 h-6" />}
+                               </div>
+                               <div className={cn("w-6 h-6 rounded-full border-2 flex items-center justify-center transition-all duration-500", active ? "border-indigo-500 bg-indigo-500 shadow-lg shadow-indigo-500/30" : "border-muted/20")}>
+                                  {active && <div className="w-2.5 h-2.5 bg-white rounded-full shadow-inner animate-in zoom-in-50" />}
+                               </div>
+                            </div>
+                            <h4 className={cn("font-bold text-2xl mb-2 transition-colors duration-500", active ? "text-foreground" : "text-muted-foreground")}>{isExam ? "Exam Cond." : "Adaptive"}</h4>
+                            <p className="text-sm font-medium text-muted-foreground leading-relaxed opacity-80">
+                              {isExam
+                                ? "Strict timing. No assistance. True test of grit."
+                                : "Instant AI feedback per question to master concepts."}
+                            </p>
+                          </button>
+                        )
+                      })}
+                    </div>
+                 </div>
+
+                 {error && (
+                   <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="bg-red-500/10 border border-red-500/20 p-4 rounded-2xl flex items-center gap-3 text-red-500">
+                     <AlertCircle className="w-5 h-5" />
+                     <p className="text-sm font-bold">{error}</p>
+                   </motion.div>
+                 )}
+
+                 <div className="pt-6">
+                    <Button
+                      onClick={handleConfirm}
+                      disabled={confirming}
+                      size="lg"
+                      className="w-full text-xl h-18 group"
+                    >
+                      {confirming ? (
+                        <div className="flex items-center gap-3">
+                          <div className="w-6 h-6 border-3 border-white/30 border-t-white rounded-full animate-spin" />
+                          <span>Initializing...</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-3">
+                          <Play className="w-6 h-6 fill-current group-hover:scale-110 transition-transform" />
+                          <span>Commence Run</span>
+                        </div>
+                      )}
+                    </Button>
+                    <p className="text-center text-[10px] font-bold text-muted-foreground uppercase tracking-[0.3em] mt-6 opacity-40">System ready for deployment</p>
                  </div>
               </div>
-              
-              <div className="mt-10 mb-8 w-full h-px bg-gray-100" />
-
-              <div className="space-y-4">
-                <p className="text-xs font-black uppercase tracking-widest text-gray-400">Select Mode</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {(["exam", "practice"] as const).map((m) => {
-                    const isExam = m === "exam";
-                    return (
-                      <button
-                        key={m}
-                        onClick={() => setMode(m)}
-                        className={cn(
-                          "rounded-3xl p-6 text-left transition-all border-2 outline-none group",
-                          mode === m
-                            ? "border-indigo-500 bg-indigo-50/50 shadow-md shadow-indigo-500/10 scale-[1.02]"
-                            : "border-gray-100 bg-white hover:border-indigo-200 hover:bg-gray-50 hover:scale-[1.01]"
-                        )}
-                      >
-                        <div className="flex items-center justify-between mb-3">
-                           <div className={cn("w-10 h-10 rounded-2xl flex items-center justify-center shadow-sm", isExam ? "bg-red-100 text-red-600" : "bg-emerald-100 text-emerald-600")}>
-                             {isExam ? <Clock className="w-5 h-5" /> : <CheckCircle2 className="w-5 h-5" />}
-                           </div>
-                           <div className={cn("w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors", mode === m ? "border-indigo-500 text-indigo-500" : "border-gray-200 text-transparent")}>
-                              <div className={cn("w-2.5 h-2.5 bg-current rounded-full", mode === m ? "scale-100" : "scale-0")}/>
-                           </div>
-                        </div>
-                        <p className={cn("font-extrabold text-xl mb-1", mode === m ? "text-indigo-900" : "text-gray-800")}>{isExam ? "Exam Cond." : "Practice"}</p>
-                        <p className="text-sm font-semibold text-gray-500 leading-relaxed">
-                          {isExam
-                            ? "Strict timing. Full submission at end. No assist."
-                            : "Instant AI feedback per question to master concepts."}
-                        </p>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              {error && (
-                <p className="text-sm font-bold text-red-600 mt-6 bg-red-50 p-4 rounded-xl">{error}</p>
-              )}
-
-              <div className="mt-10">
-                <button
-                  onClick={handleConfirm}
-                  disabled={confirming}
-                  className="w-full py-5 rounded-[1.5rem] bg-gray-900 hover:bg-black text-white font-black text-lg transition-all active:scale-95 shadow-xl shadow-black/20 flex items-center justify-center gap-3 disabled:opacity-50 disabled:scale-100"
-                >
-                  {confirming ? (
-                    <><div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" /> Initializing...</>
-                  ) : (
-                    <><Play className="w-5 h-5 fill-current" /> Commense Run</>
-                  )}
-                </button>
-              </div>
-            </motion.div>
+            </GlassCard>
           </motion.div>
         )}
       </div>
