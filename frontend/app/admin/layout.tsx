@@ -101,6 +101,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         });
         if (!res.ok) { router.replace("/login"); return; }
         const emp: EmployeeProfile = await res.json();
+        if (emp.role !== "admin") { router.replace("/workstation"); return; }
         setEmployee(emp);
       } catch {
         router.replace("/login");

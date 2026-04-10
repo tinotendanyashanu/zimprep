@@ -27,30 +27,34 @@ export default function LoginPage() {
     }
 
     const user = authData.user;
-    if (user) {
-      let destination = "/dashboard";
+    if (!user) { router.push("/dashboard"); return; }
 
-      const { data: employee } = await supabase
-        .from("employee")
-        .select("role")
-        .or(`user_id.eq.${user.id},email.eq.${user.email}`)
-        .maybeSingle();
+    // 1. Check employee table first (admin / employee roles)
+    const { data: employee } = await supabase
+      .from("employee")
+      .select("role, is_active")
+      .or(`user_id.eq.${user.id},email.eq.${user.email}`)
+      .maybeSingle();
 
-      if (employee) {
-        destination = employee.role === "admin" ? "/admin" : "/workstation";
-      } else {
-        const { data: parent } = await supabase
-          .from("parent")
-          .select("id")
-          .eq("id", user.id)
-          .maybeSingle();
-        if (parent) destination = "/parent/dashboard";
-      }
-
-      router.push(destination);
-    } else {
-      router.push("/dashboard");
+    if (employee?.is_active) {
+      router.push(employee.role === "admin" ? "/admin" : "/workstation");
+      return;
     }
+
+    // 2. Check parent table
+    const { data: parent } = await supabase
+      .from("parent")
+      .select("id")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    if (parent) {
+      router.push("/parent/dashboard");
+      return;
+    }
+
+    // 3. Default: student dashboard
+    router.push("/dashboard");
   }
 
   return (
