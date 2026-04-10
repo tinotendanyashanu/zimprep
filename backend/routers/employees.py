@@ -160,10 +160,16 @@ def invite_employee(
 
     # Send Supabase invitation email — this creates the auth.users record
     # and emails a magic link so the person can set their password.
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    redirect_to = f"{frontend_url}/auth/callback?next=/reset-password"
+
     try:
         invite_resp = sb.auth.admin.invite_user_by_email(
             payload.email,
-            options={"data": {"name": payload.name, "employee_role": payload.role}},
+            options={
+                "data": {"name": payload.name, "employee_role": payload.role},
+                "redirect_to": redirect_to,
+            },
         )
         auth_user_id = invite_resp.user.id if invite_resp.user else None
     except Exception as exc:
@@ -243,12 +249,15 @@ def reset_employee_password(
 
     supabase_url = os.environ["SUPABASE_URL"]
     supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000")
+    redirect_to = f"{frontend_url}/auth/callback?next=/reset-password"
 
     try:
         r = httpx.post(
             f"{supabase_url}/auth/v1/recover",
             headers={"apikey": supabase_key, "Content-Type": "application/json"},
             json={"email": emp.data["email"]},
+            params={"redirect_to": redirect_to},
             timeout=10,
         )
         if r.status_code not in (200, 204):
