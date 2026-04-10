@@ -53,7 +53,7 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           ref={ref as any}
           {...props}
         >
-          {children}
+          {children as React.ReactNode}
         </Slot>
       )
     }
