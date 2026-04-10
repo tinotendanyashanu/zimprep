@@ -48,10 +48,11 @@ const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
   ({ className, variant, size, asChild = false, isLoading, children, disabled, ...props }, ref) => {
     if (asChild) {
       return (
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         <Slot
           className={cn(buttonVariants({ variant, size, className }))}
           ref={ref as any}
-          {...props}
+          {...(props as any)}
         >
           {children as React.ReactNode}
         </Slot>
