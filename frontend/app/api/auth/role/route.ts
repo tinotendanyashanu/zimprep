@@ -52,7 +52,9 @@ export async function GET(request: Request) {
     .eq("user_id", user.id);
 
   const roles: string[] = (roleRows ?? [])
-    .map((r: { roles: { name: string } | null }) => r.roles?.name ?? "")
+    .flatMap((r: { roles: { name: string }[] | { name: string } | null }) =>
+      Array.isArray(r.roles) ? r.roles.map((x) => x.name) : r.roles ? [r.roles.name] : []
+    )
     .filter(Boolean);
 
   if (roles.includes("admin") || roles.includes("employee")) {
