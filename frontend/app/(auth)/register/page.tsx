@@ -82,6 +82,19 @@ export default function RegisterPage() {
       return;
     }
 
+    // Assign student role via server-side API (uses service key, bypasses RLS)
+    const session = data.session;
+    if (session) {
+      await fetch("/api/auth/assign-role", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ role: "student" }),
+      });
+    }
+
     router.push("/dashboard");
     router.refresh();
   }

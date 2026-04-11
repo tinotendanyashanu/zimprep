@@ -192,6 +192,23 @@ def invite_employee(
     resp = sb.table("employee").insert(new_emp).execute()
     if not resp.data:
         raise HTTPException(status_code=500, detail="Failed to create employee record")
+
+    # Assign role in user_roles table (new RBAC schema).
+    # The users row is created automatically by the DB trigger (on_auth_user_created).
+    # We only need to add the role mapping here.
+    if auth_user_id:
+        try:
+            role_resp = sb.table("roles").select("id").eq("name", payload.role).maybe_single().execute()
+            if role_resp.data:
+                sb.table("user_roles").upsert(
+                    {"user_id": auth_user_id, "role_id": role_resp.data["id"]},
+                    on_conflict="user_id,role_id",
+                ).execute()
+        except Exception as exc:
+            # Non-fatal: employee record was created; role assignment can be
+            # retried manually or on next login via the fallback lookup.
+            logger.warning("user_roles insert failed for %s: %s", auth_user_id, exc)
+
     return resp.data[0]
 
 
@@ -248,14 +265,20 @@ def reset_employee_password(
         raise HTTPException(status_code=400, detail="Employee has not signed up yet — resend the invite instead")
 
     supabase_url = os.environ["SUPABASE_URL"]
-    supabase_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    # The /auth/v1/recover endpoint expects the anon key, not the service role key.
+    anon_key = os.environ.get("SUPABASE_ANON_KEY") or os.environ.get("NEXT_PUBLIC_SUPABASE_ANON_KEY")
+    if not anon_key:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_ANON_KEY is not configured on the server",
+        )
     frontend_url = os.environ.get("FRONTEND_URL", "http://localhost:3000").rstrip("/")
     redirect_to = f"{frontend_url}/auth/callback?next=/reset-password"
 
     try:
         r = httpx.post(
             f"{supabase_url}/auth/v1/recover",
-            headers={"apikey": supabase_key, "Content-Type": "application/json"},
+            headers={"apikey": anon_key, "Content-Type": "application/json"},
             json={"email": emp.data["email"], "redirect_to": redirect_to},
             timeout=10,
         )

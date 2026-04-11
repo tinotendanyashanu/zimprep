@@ -50,6 +50,19 @@ export default function RegisterParentPage() {
       return;
     }
 
+    // Assign parent role via server-side API (uses service key, bypasses RLS)
+    const session = data.session;
+    if (session) {
+      await fetch("/api/auth/assign-role", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ role: "parent" }),
+      });
+    }
+
     router.push("/parent/dashboard");
     router.refresh();
   }
