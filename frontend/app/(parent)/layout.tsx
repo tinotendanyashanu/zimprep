@@ -75,25 +75,31 @@ export default function ParentLayout({
 
   useEffect(() => {
     const supabase = createClient();
-    supabase.auth.getUser().then(async ({ data: { user } }) => {
-      if (!user) {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (!session) {
         router.push("/login");
         return;
       }
+      const user = session.user;
+      const token = session.access_token;
 
-      // Check if viewer is an employee/admin (preview mode)
-      const { data: emp } = await supabase
-        .from("employee")
-        .select("role")
-        .eq("user_id", user.id)
-        .maybeSingle();
-
-      if (emp) {
-        // Employee/admin previewing parent view — show a placeholder name
-        setEmployeeRole(emp.role);
-        setParentName("Parent Preview");
-        setReady(true);
-        return;
+      // Use the role API (server-side, bypasses RLS) to check if viewer is
+      // an admin or employee previewing the parent view.
+      try {
+        const res = await fetch("/api/auth/role", {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const roleData = await res.json();
+          if (roleData.role === "admin" || roleData.role === "employee") {
+            setEmployeeRole(roleData.role);
+            setParentName("Parent Preview");
+            setReady(true);
+            return;
+          }
+        }
+      } catch {
+        // fall through to parent check
       }
 
       const { data: parent } = await supabase

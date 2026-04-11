@@ -1,6 +1,17 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import {
+  ResponsiveContainer,
+  AreaChart,
+  Area,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ReferenceLine,
+} from "recharts";
 import { createClient } from "@/lib/supabase/client";
 import {
   getParentChildren,
@@ -599,6 +610,119 @@ function WeeklyReport({
   );
 }
 
+// ── Performance Line Chart ────────────────────────────────────────────────────
+
+const SUBJECT_COLORS = [
+  "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#3b82f6",
+  "#8b5cf6", "#14b8a6", "#f97316",
+];
+
+function PerformanceLineChart({ sessions }: { sessions: SessionSummary[] }) {
+  const valid = sessions
+    .filter((s) => s.completed_at && s.percentage != null)
+    .sort((a, b) => new Date(a.completed_at!).getTime() - new Date(b.completed_at!).getTime());
+
+  if (valid.length < 2) {
+    return (
+      <div className="flex h-40 items-center justify-center rounded-xl border border-gray-200 bg-gray-50 text-sm text-gray-400">
+        Not enough session data for a performance graph yet.
+      </div>
+    );
+  }
+
+  // Group by subject to render one line per subject
+  const subjects = Array.from(new Set(valid.map((s) => s.subject_name ?? "Unknown")));
+  const multiSubject = subjects.length > 1;
+
+  // Build chart data: one entry per session, keyed by date label
+  const chartData = valid.map((s) => {
+    const d = new Date(s.completed_at!);
+    const label = d.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+    const entry: Record<string, string | number> = {
+      date: label,
+      fullDate: s.completed_at!,
+    };
+    if (multiSubject) {
+      entry[s.subject_name ?? "Unknown"] = s.percentage!;
+    } else {
+      entry["Score"] = s.percentage!;
+    }
+    return entry;
+  });
+
+  const lines = multiSubject ? subjects : ["Score"];
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white p-5 shadow-sm">
+      <h3 className="mb-1 font-semibold">Performance Over Time</h3>
+      <p className="mb-4 text-xs text-gray-400">Score % per completed session</p>
+
+      <ResponsiveContainer width="100%" height={220}>
+        <AreaChart data={chartData} margin={{ top: 8, right: 8, left: -16, bottom: 0 }}>
+          <defs>
+            {lines.map((name, i) => (
+              <linearGradient
+                key={name}
+                id={`grad-${i}`}
+                x1="0"
+                y1="0"
+                x2="0"
+                y2="1"
+              >
+                <stop offset="5%" stopColor={SUBJECT_COLORS[i % SUBJECT_COLORS.length]} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={SUBJECT_COLORS[i % SUBJECT_COLORS.length]} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+          <XAxis
+            dataKey="date"
+            tick={{ fontSize: 11, fill: "#94a3b8" }}
+            axisLine={false}
+            tickLine={false}
+          />
+          <YAxis
+            domain={[0, 100]}
+            tick={{ fontSize: 11, fill: "#94a3b8" }}
+            axisLine={false}
+            tickLine={false}
+            tickFormatter={(v) => `${v}%`}
+          />
+          <Tooltip
+            contentStyle={{
+              background: "#fff",
+              border: "1px solid #e2e8f0",
+              borderRadius: "10px",
+              fontSize: 12,
+            }}
+            formatter={(value: number | undefined, name: string | undefined) => [`${value ?? "—"}%`, name ?? ""]}
+          />
+          {lines.length > 1 && (
+            <Legend
+              wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+              iconType="circle"
+            />
+          )}
+          <ReferenceLine y={50} stroke="#fca5a5" strokeDasharray="4 4" label={{ value: "50%", fontSize: 10, fill: "#ef4444" }} />
+          {lines.map((name, i) => (
+            <Area
+              key={name}
+              type="monotone"
+              dataKey={name}
+              stroke={SUBJECT_COLORS[i % SUBJECT_COLORS.length]}
+              strokeWidth={2.5}
+              fill={`url(#grad-${i})`}
+              dot={{ r: 4, fill: SUBJECT_COLORS[i % SUBJECT_COLORS.length], strokeWidth: 0 }}
+              activeDot={{ r: 6 }}
+              connectNulls
+            />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
 // ── Detailed child progress (preserved from original, unchanged) ──────────────
 
 function SessionRow({ s }: { s: SessionSummary }) {
@@ -673,6 +797,11 @@ function ChildProgress({
           </div>
         </div>
       </div>
+
+      {/* Performance line chart */}
+      {data.recent_sessions.length > 0 && (
+        <PerformanceLineChart sessions={data.recent_sessions} />
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
