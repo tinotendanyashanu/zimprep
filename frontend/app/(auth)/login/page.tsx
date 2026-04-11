@@ -5,8 +5,6 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
 export default function LoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -28,37 +26,24 @@ export default function LoginPage() {
       return;
     }
 
-    const user = authData.user;
     const session = authData.session;
-    if (!user || !session) { router.push("/dashboard"); return; }
+    if (!session) { router.push("/dashboard"); return; }
 
-    // 1. Check employee/admin status via backend (uses service role — bypasses RLS)
+    // Check role via internal Next.js API (uses Supabase service role — no backend needed)
     try {
-      const res = await fetch(`${BACKEND}/admin/employees/me`, {
+      const res = await fetch("/api/auth/role", {
         headers: { Authorization: `Bearer ${session.access_token}` },
       });
       if (res.ok) {
-        const emp = await res.json();
-        router.push(emp.role === "admin" ? "/admin" : "/workstation");
-        return;
+        const { role } = await res.json();
+        if (role === "admin") { router.push("/admin"); return; }
+        if (role === "employee") { router.push("/workstation"); return; }
+        if (role === "parent") { router.push("/parent/dashboard"); return; }
       }
     } catch {
-      // backend unreachable — fall through to table checks
+      // API unreachable — default to student
     }
 
-    // 2. Check parent table
-    const { data: parent } = await supabase
-      .from("parent")
-      .select("id")
-      .eq("id", user.id)
-      .maybeSingle();
-
-    if (parent) {
-      router.push("/parent/dashboard");
-      return;
-    }
-
-    // 3. Default: student dashboard
     router.push("/dashboard");
   }
 

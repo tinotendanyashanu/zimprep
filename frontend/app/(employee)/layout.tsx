@@ -5,8 +5,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 
-const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
-
 type EmployeeProfile = { id: string; name: string; role: string; email: string };
 
 const NAV = [
@@ -77,12 +75,13 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
     supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (!session) { router.replace("/login"); return; }
       try {
-        const res = await fetch(`${BACKEND}/admin/employees/me`, {
+        const res = await fetch("/api/auth/role", {
           headers: { Authorization: `Bearer ${session.access_token}` },
         });
         if (!res.ok) { router.replace("/login"); return; }
-        const emp: EmployeeProfile = await res.json();
-        setEmployee(emp);
+        const data = await res.json();
+        if (data.role !== "admin" && data.role !== "employee") { router.replace("/login"); return; }
+        setEmployee({ id: data.id, name: data.name, role: data.role, email: data.email });
       } catch {
         router.replace("/login");
       } finally {
